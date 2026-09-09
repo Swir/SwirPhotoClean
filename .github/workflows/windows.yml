@@ -24,10 +24,11 @@ jobs:
       - name: Smoke-test the packaged executable
         shell: pwsh
         run: |
-          $process = Start-Process -FilePath dist/SwirPhotoClean/SwirPhotoClean.exe -ArgumentList '--self-test', 'packaged-smoke.json' -WindowStyle Hidden -PassThru
+          $reportPath = Join-Path $PWD 'packaged-smoke.json'
+          $process = Start-Process -FilePath dist/SwirPhotoClean/SwirPhotoClean.exe -ArgumentList '--self-test', $reportPath -WindowStyle Hidden -PassThru
           if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Packaged app timed out' }
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed' }
-          $report = Get-Content packaged-smoke.json -Raw | ConvertFrom-Json
+          $report = Get-Content $reportPath -Raw | ConvertFrom-Json
           if (-not $report.ok) { throw 'Packaged smoke test failed' }
       - uses: actions/upload-artifact@v4
         with:

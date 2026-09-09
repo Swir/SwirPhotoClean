@@ -9,6 +9,8 @@
 - 16 testów silnika: identyczne pliki, podobny obraz po skalowaniu/JPEG, rozróżnianie jednolitych kolorów, uszkodzone i animowane pliki, anulowanie, powtarzające się foldery, hardlinki, eksport CSV.
 - Ochrona zachowywanej kopii i blokowanie nieznanych/zmienionych plików, w tym zmiany treści przy zachowanym rozmiarze i czasie modyfikacji.
 - Test GUI: utworzenie okna i dwóch podglądów, zaznaczanie, blokada całej grupy, stany przycisków.
+- Poprawne zastosowanie orientacji EXIF przed obliczeniem wymiarów i podobieństwa.
+- Test obciążenia 500 wygenerowanych obrazów: 1,36 s w lokalnym środowisku testowym, bez ostrzeżeń; wynik nie jest obietnicą wydajności na innych dyskach i komputerach.
 - Próba systemowego kosza wyłącznie na wygenerowanych danych: Windows zwrócił przerwanie; oba pliki pozostały na miejscu. Nie uznano tej próby za udane przeniesienie.
 
 ## Warunki odbioru — do zakończenia przed 1.0
@@ -18,7 +20,7 @@
 - [ ] Sprawdzenie wyglądu przy skalowaniu 100% i 150%, długich ścieżkach i małym oknie.
 - [ ] Udane przeniesienie wygenerowanej kopii do kosza i jej przywrócenie na Windows, przy zachowaniu oryginału.
 - [ ] Potwierdzenie odmowy trwałego usuwania przy niedostępnym koszu.
-- [ ] Test pracy na większym zbiorze danych, responsywności i anulowania w trakcie porównywania.
+- [x] Test pracy na 500 wygenerowanych obrazach oraz anulowania w trakcie porównywania; przed 1.0 warto rozszerzyć próbę na wolniejszy dysk i większe fotografie.
 - [ ] Testy formatu EXIF, limitu dużych obrazów i błędów dostępu.
 - [ ] Paczka portable z instrukcją i potwierdzonym zakresem obsługiwanych formatów.
 

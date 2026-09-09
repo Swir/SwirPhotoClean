@@ -45,6 +45,20 @@ class CoreTests(unittest.TestCase):
         self.assertEqual([g.kind for g in result.groups], ["exact", "similar"])
         self.assertEqual(len(result.groups[1].photos), 3)
 
+    def test_exif_orientation_is_applied(self):
+        image = Image.new("RGB", (80, 120), "black")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 35, 50), fill="white")
+        exif = image.getexif()
+        exif[274] = 6
+        image.save(self.root / "oriented.jpg", quality=95, exif=exif)
+        expected = image.transpose(Image.Transpose.ROTATE_270)
+        expected.save(self.root / "pixels-rotated.jpg", quality=95)
+        result = scan([self.root])
+        oriented = next(p for p in result.photos if p.path.name == "oriented.jpg")
+        self.assertEqual((oriented.width, oriented.height), (120, 80))
+        self.assertTrue(any(g.kind == "similar" and oriented in g.photos for g in result.groups))
+
     def test_flat_different_colors_not_similar(self):
         Image.new("RGB", (100, 100), "red").save(self.root / "red.png")
         Image.new("RGB", (100, 100), "blue").save(self.root / "blue.png")
@@ -66,6 +80,15 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(result.groups, [])
         with self.assertRaises(SafetyError):
             recycle_selected(result, [], recycle=lambda _: None)
+
+    def test_cancel_during_similarity_has_no_actionable_results(self):
+        cancel = threading.Event()
+        def progress(message):
+            if message.startswith("Porównywanie"):
+                cancel.set()
+        result = scan([self.root], cancel=cancel, progress=progress)
+        self.assertTrue(result.cancelled)
+        self.assertEqual(result.groups, [])
 
     def test_exact_only(self):
         with Image.open(self.root / "oryginał.png") as im:

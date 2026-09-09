@@ -212,6 +212,7 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
                 checkpoint(cancel)
                 photo = items[0]
                 progress(f"Porównywanie zdjęć • {index + 1}/{len(exact)}")
+                checkpoint(cancel)
                 anchor = next((candidate for candidate in tree.query(photo.dhash, threshold, cancel)
                                if similar(candidate, photo, threshold)), None)
                 if anchor is None:
