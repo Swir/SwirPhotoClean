@@ -72,6 +72,31 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(result.warnings), 2)
         self.assertEqual(len(result.photos), 2)
 
+    def test_configured_pixel_limit_is_reported(self):
+        with patch("photoclean.core.MAX_PIXELS", 100):
+            result = scan([self.root])
+        self.assertEqual(result.photos, [])
+        self.assertEqual(len(result.warnings), 2)
+        self.assertTrue(all("40 megapikseli" in message for message in result.warnings))
+
+    def test_access_error_is_reported_without_crashing_scan(self):
+        original_open = Path.open
+        denied = self.root / "kopia.png"
+        def selective_open(path, *args, **kwargs):
+            if path == denied:
+                raise PermissionError("brak dostępu testowego")
+            return original_open(path, *args, **kwargs)
+        with patch.object(Path, "open", selective_open):
+            result = scan([self.root])
+        self.assertEqual(len(result.photos), 1)
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("brak dostępu testowego", result.warnings[0])
+
+    def test_compact_color_signature(self):
+        result = scan([self.root])
+        self.assertIsInstance(result.photos[0].color, bytes)
+        self.assertEqual(len(result.photos[0].color), 192)
+
     def test_cancel_has_no_actionable_results(self):
         cancel = threading.Event()
         cancel.set()

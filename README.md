@@ -11,7 +11,7 @@ Lokalna aplikacja z polskim interfejsem. Bez konta, abonamentu i wysyłania zdj�
 - Wiele folderów i skanowanie podfolderów w tle; przycisk anulowania.
 - **Identyczne pliki:** porównanie SHA-256 całej zawartości.
 - **Podobne zdjęcia:** różnicowy hash obrazu, proporcje i porównanie kolorów. Trzy poziomy czułości.
-- Podgląd dwóch zdjęć obok siebie, pełne ścieżki, wymiary i rozmiary.
+- Podgląd dwóch zdjęć obok siebie, wymiary i rozmiary; pełne ścieżki można skopiować jednym przyciskiem.
 - Ręczne zaznaczanie plików do systemowego kosza. Brak automatycznego zaznaczania.
 - Blokada zaznaczenia wszystkich zdjęć w dowolnej grupie.
 - Ponowne sprawdzenie zawartości i metadanych wybranych plików oraz zachowywanych kopii przed operacją.
@@ -35,9 +35,10 @@ py -3.12 -m venv .venv
 2. Wybierz, czy szukać również podobnych zdjęć. Zacznij od poziomu Standardowego.
 3. Kliknij **Skanuj zdjęcia** i poczekaj na zakończenie.
 4. Wybierz grupę po lewej. Zaznacz do dwóch wierszy z użyciem Ctrl, aby porównać obrazy.
-5. Wybierz pojedynczy plik i kliknij **Zaznacz / odznacz do kosza**. Kolumna „Do kosza” pokaże TAK. Sam wybór wiersza do podglądu niczego nie zaznacza do usunięcia.
-6. Kliknij **Przenieś zaznaczone do kosza**, sprawdź listę i potwierdź.
-7. Pliki można przywrócić przez systemowy Kosz Windows. Po przenoszeniu wykonaj nowy skan.
+5. W razie potrzeby kliknij **Kopiuj ścieżkę**, aby skopiować pełne położenie wybranych zdjęć.
+6. Wybierz pojedynczy plik i kliknij **Zaznacz / odznacz do kosza**. Kolumna „Do kosza” pokaże TAK. Sam wybór wiersza do podglądu niczego nie zaznacza do usunięcia.
+7. Kliknij **Przenieś zaznaczone do kosza**, sprawdź listę i potwierdź.
+8. Pliki można przywrócić przez systemowy Kosz Windows. Po przenoszeniu wykonaj nowy skan.
 
 „Do kosza” pokazuje sumę rozmiarów zaznaczonych plików, nie gwarantowaną ilość wolnego miejsca. Pliki w koszu nadal zajmują miejsce; aplikacja nie opróżnia kosza.
 

@@ -6,23 +6,24 @@
 
 ## Zweryfikowano lokalnie
 
-- 16 testów silnika: identyczne pliki, podobny obraz po skalowaniu/JPEG, rozróżnianie jednolitych kolorów, uszkodzone i animowane pliki, anulowanie, powtarzające się foldery, hardlinki, eksport CSV.
+- Testy silnika: identyczne pliki, podobny obraz po skalowaniu/JPEG, rozróżnianie jednolitych kolorów, uszkodzone i animowane pliki, anulowanie, powtarzające się foldery, hardlinki, eksport CSV, limit pikseli i odmowa dostępu.
 - Ochrona zachowywanej kopii i blokowanie nieznanych/zmienionych plików, w tym zmiany treści przy zachowanym rozmiarze i czasie modyfikacji.
 - Test GUI: utworzenie okna i dwóch podglądów, zaznaczanie, blokada całej grupy, stany przycisków.
 - Poprawne zastosowanie orientacji EXIF przed obliczeniem wymiarów i podobieństwa.
 - Test obciążenia 500 wygenerowanych obrazów: 1,36 s w lokalnym środowisku testowym, bez ostrzeżeń; wynik nie jest obietnicą wydajności na innych dyskach i komputerach.
+- Sygnatura kolorów zajmuje 192 bajty na zdjęcie zamiast krotek liczb zmiennoprzecinkowych, co ogranicza zużycie pamięci przy większych kolekcjach.
 - Próba systemowego kosza wyłącznie na wygenerowanych danych: Windows zwrócił przerwanie; oba pliki pozostały na miejscu. Nie uznano tej próby za udane przeniesienie.
 
 ## Warunki odbioru — do zakończenia przed 1.0
 
-- [ ] Udane testy i kompilacja EXE w GitHub Actions.
+- [x] Udane testy, kompilacja EXE, samokontrola gotowej paczki i artefakt ZIP w GitHub Actions (uruchomienie 34392989558).
 - [x] Test uruchomienia gotowego EXE z własnym Tcl/Tk i dwoma podglądami obrazów. Pierwsza paczka ujawniła błąd wyszukiwania Tcl; poprawiona paczka przeszła samokontrolę.
-- [ ] Sprawdzenie wyglądu przy skalowaniu 100% i 150%, długich ścieżkach i małym oknie.
+- [x] Sprawdzenie wyglądu przy skalowaniu 100% i 150%, długich ścieżkach i minimalnym oknie 900 × 700; pełną ścieżkę można skopiować przyciskiem bez rozciągania interfejsu.
 - [ ] Udane przeniesienie wygenerowanej kopii do kosza i jej przywrócenie na Windows, przy zachowaniu oryginału.
-- [ ] Potwierdzenie odmowy trwałego usuwania przy niedostępnym koszu.
+- [x] Potwierdzenie odmowy trwałego usuwania przy niedostępnym koszu: Windows nie potwierdził operacji kosza, aplikacja ją przerwała, a oba wygenerowane pliki pozostały na miejscu.
 - [x] Test pracy na 500 wygenerowanych obrazach oraz anulowania w trakcie porównywania; przed 1.0 warto rozszerzyć próbę na wolniejszy dysk i większe fotografie.
-- [ ] Testy formatu EXIF, limitu dużych obrazów i błędów dostępu.
-- [ ] Paczka portable z instrukcją i potwierdzonym zakresem obsługiwanych formatów.
+- [x] Testy orientacji EXIF, limitu dużych obrazów i błędów dostępu.
+- [x] Paczka portable z instrukcją i potwierdzonym zakresem obsługiwanych formatów; artefakt CI ma skrót SHA-256 `1c0d7a059605c6d16a58c513b382d74e094f26bedb35b9d5e3e355bd527d39f2` i wygasa 2026-12-08.
 
 ## Notatki środowiska deweloperskiego
 

@@ -37,7 +37,7 @@ class Photo:
     width: int
     height: int
     dhash: int
-    color: tuple[float, ...]
+    color: bytes
 
 
 @dataclass(frozen=True)
@@ -101,8 +101,8 @@ def read_photo(path: Path, cancel: threading.Event) -> Photo:
                     bits = (bits << 1) | (gray[y * 9 + x] > gray[y * 9 + x + 1])
             # Low-resolution RGB signature prevents flat, different-color images
             # with identical gradient hashes from becoming false matches.
-            color = tuple(rgb.resize((8, 8), Image.Resampling.LANCZOS).get_flattened_data())
-            color = tuple(float(c) for pixel in color for c in pixel)
+            pixels = rgb.resize((8, 8), Image.Resampling.LANCZOS).get_flattened_data()
+            color = bytes(channel for pixel in pixels for channel in pixel)
     after = path.stat()
     if signature(before) != signature(after):
         raise ValueError("plik zmienił się podczas skanowania")

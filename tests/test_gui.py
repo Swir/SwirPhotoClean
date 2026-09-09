@@ -12,6 +12,20 @@ from photoclean.gui import PhotoCleanApp
 
 
 class GuiTests(unittest.TestCase):
+    def test_layout_fits_minimum_window_at_150_percent(self):
+        root = tk.Tk()
+        root.withdraw()
+        root.tk.call("tk", "scaling", 1.5)
+        app = PhotoCleanApp(root)
+        try:
+            root.geometry("900x700")
+            root.update_idletasks()
+            self.assertLessEqual(root.winfo_reqwidth(), 900)
+            self.assertLessEqual(root.winfo_reqheight(), 700)
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
     def test_preview_mark_export_state(self):
         root = tk.Tk()
         root.withdraw()
@@ -25,8 +39,11 @@ class GuiTests(unittest.TestCase):
                 app.render_groups()
                 root.update()
                 self.assertEqual(len(app.images), 2)
+                self.assertNotIn("\n", app.preview_panels[0][1]["text"])
                 self.assertFalse(app.marked)
                 app.files.selection_set("0")
+                app.copy_selected_paths()
+                self.assertEqual(root.clipboard_get(), str(p))
                 app.toggle_mark()
                 self.assertEqual(len(app.marked), 1)
                 self.assertEqual(str(app.trash_button["state"]), "normal")
