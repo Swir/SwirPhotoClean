@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import queue
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -14,6 +15,11 @@ from . import __version__
 from .core import MAX_PIXELS, ScanResult, export_csv, recycle_selected, scan
 
 BG, PANEL, TEXT, MUTED, ACCENT = "#101723", "#192436", "#eef4ff", "#aebdd1", "#49d4bd"
+
+
+def bundled_asset(name):
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / "assets" / name
 
 
 def human_size(size):
@@ -36,6 +42,10 @@ class PhotoCleanApp:
         self.images = []
         self.progress_pending = ""
         root.title(f"SWIR PhotoClean {__version__}")
+        try:
+            root.iconbitmap(default=str(bundled_asset("SwirPhotoClean.ico")))
+        except tk.TclError:
+            pass
         root.geometry("1220x760")
         root.minsize(900, 700)
         root.configure(bg=BG)

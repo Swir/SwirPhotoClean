@@ -20,7 +20,7 @@ jobs:
       - name: Core and GUI tests
         run: python -m unittest discover -s tests -v
       - name: Build portable app
-        run: python -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean run.py
+        run: python -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean --icon assets/SwirPhotoClean.ico --add-data "assets;assets" run.py
       - name: Smoke-test the packaged executable
         shell: pwsh
         run: |

@@ -14,6 +14,7 @@
 - Sygnatura kolorów zajmuje 192 bajty na zdjęcie zamiast krotek liczb zmiennoprzecinkowych, co ogranicza zużycie pamięci przy większych kolekcjach.
 - Próba systemowego kosza wyłącznie na wygenerowanych danych: Windows zwrócił przerwanie; oba pliki pozostały na miejscu. Nie uznano tej próby za udane przeniesienie.
 - Test integracyjny Kosza Windows przy każdej kompilacji sprawdza wygenerowany plik: powodzenie wymaga zniknięcia źródła, a błąd wymaga pozostawienia go bez zmian.
+- Program i okno mają własną wielorozmiarową ikonę, dołączaną również do paczki portable.
 
 ## Warunki odbioru — do zakończenia przed 1.0
 

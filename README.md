@@ -1,5 +1,7 @@
 # SWIR PhotoClean
 
+<img src="assets/SwirPhotoClean.png" width="160" alt="Ikona SWIR PhotoClean">
+
 **Znajdź duplikaty i podobne zdjęcia na Windows. Porównaj je i odzyskaj miejsce.**
 
 Lokalna aplikacja z polskim interfejsem. Bez konta, abonamentu i wysyłania zdjęć do internetu.
@@ -64,7 +66,7 @@ Exact matches use full-file SHA-256. Similarity uses gradient hashes, aspect rat
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean run.py
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean --icon assets/SwirPhotoClean.ico --add-data "assets;assets" run.py
 ```
 
 Uruchom `dist/SwirPhotoClean/SwirPhotoClean.exe`. Do przenoszenia aplikacji skopiuj **cały folder** `dist/SwirPhotoClean`, nie sam plik EXE.
