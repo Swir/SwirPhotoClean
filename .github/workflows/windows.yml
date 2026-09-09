@@ -1,0 +1,36 @@
+name: Windows tests and portable build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-build.txt
+      - name: Core and GUI tests
+        run: python -m unittest discover -s tests -v
+      - name: Build portable app
+        run: python -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean run.py
+      - name: Smoke-test the packaged executable
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath dist/SwirPhotoClean/SwirPhotoClean.exe -ArgumentList '--self-test', 'packaged-smoke.json' -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Packaged app timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Packaged app failed' }
+          $report = Get-Content packaged-smoke.json -Raw | ConvertFrom-Json
+          if (-not $report.ok) { throw 'Packaged smoke test failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SwirPhotoClean-windows-portable
+          path: dist/SwirPhotoClean/
+          if-no-files-found: error
