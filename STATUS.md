@@ -13,6 +13,7 @@
 - Test obciążenia 500 wygenerowanych obrazów: 1,36 s w lokalnym środowisku testowym, bez ostrzeżeń; wynik nie jest obietnicą wydajności na innych dyskach i komputerach.
 - Sygnatura kolorów zajmuje 192 bajty na zdjęcie zamiast krotek liczb zmiennoprzecinkowych, co ogranicza zużycie pamięci przy większych kolekcjach.
 - Próba systemowego kosza wyłącznie na wygenerowanych danych: Windows zwrócił przerwanie; oba pliki pozostały na miejscu. Nie uznano tej próby za udane przeniesienie.
+- Test integracyjny Kosza Windows przy każdej kompilacji sprawdza wygenerowany plik: powodzenie wymaga zniknięcia źródła, a błąd wymaga pozostawienia go bez zmian.
 
 ## Warunki odbioru — do zakończenia przed 1.0
 
@@ -32,4 +33,3 @@ Lokalny runtime dostarczony z aplikacją wymagał względnych TCL_LIBRARY/TK_LIB
 ## Następne kroki
 
 Najpierw zweryfikować EXE i kosz, następnie testy większych zbiorów oraz ergonomię interfejsu. Automatyzacja godzinowa ma kontynuować uzasadnione poprawki i aktualizować dowody tutaj. Zakończyć cykl po spełnieniu warunków odbioru, nie po samej kompilacji.
-
