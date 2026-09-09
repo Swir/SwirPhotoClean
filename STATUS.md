@@ -15,6 +15,7 @@
 - Próba systemowego kosza wyłącznie na wygenerowanych danych: Windows zwrócił przerwanie; oba pliki pozostały na miejscu. Nie uznano tej próby za udane przeniesienie.
 - Test integracyjny Kosza Windows przy każdej kompilacji sprawdza wygenerowany plik: powodzenie wymaga zniknięcia źródła, a błąd wymaga pozostawienia go bez zmian.
 - Program i okno mają własną wielorozmiarową ikonę, dołączaną również do paczki portable.
+- Lokalna paczka ZIP przeszła kontrolę integralności, została rozpakowana do czystego katalogu tymczasowego, a uruchomiony z niej EXE zakończył samokontrolę kodem 0.
 
 ## Warunki odbioru — do zakończenia przed 1.0
 
