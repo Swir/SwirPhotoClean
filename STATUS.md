@@ -12,7 +12,7 @@
 - Poprawne zastosowanie orientacji EXIF przed obliczeniem wymiarów i podobieństwa.
 - Test obciążenia 500 wygenerowanych obrazów: 1,36 s w lokalnym środowisku testowym, bez ostrzeżeń; wynik nie jest obietnicą wydajności na innych dyskach i komputerach.
 - Sygnatura kolorów zajmuje 192 bajty na zdjęcie zamiast krotek liczb zmiennoprzecinkowych, co ogranicza zużycie pamięci przy większych kolekcjach.
-- Próba systemowego kosza wyłącznie na wygenerowanych danych: Windows zwrócił przerwanie; oba pliki pozostały na miejscu. Nie uznano tej próby za udane przeniesienie.
+- Próby systemowego kosza na plikach wygenerowanych w katalogu tymczasowym i w Dokumentach: środowisko nie ustawiło flagi potwierdzającej Kosz, więc aplikacja przerwała operacje i pozostawiła pliki na miejscu. Kontrolna biblioteka bez tej blokady usuwała wygenerowane pliki bez utworzenia elementu w Koszu, co potwierdziło zasadność zabezpieczenia.
 - Test integracyjny Kosza Windows przy każdej kompilacji sprawdza wygenerowany plik: powodzenie wymaga zniknięcia źródła, a błąd wymaga pozostawienia go bez zmian.
 - Program i okno mają własną wielorozmiarową ikonę, dołączaną również do paczki portable.
 - Lokalna paczka ZIP przeszła kontrolę integralności, została rozpakowana do czystego katalogu tymczasowego, a uruchomiony z niej EXE zakończył samokontrolę kodem 0.
@@ -35,4 +35,3 @@ Lokalny runtime dostarczony z aplikacją wymagał względnych TCL_LIBRARY/TK_LIB
 ## Następne kroki
 
 Najpierw zweryfikować EXE i kosz, następnie testy większych zbiorów oraz ergonomię interfejsu. Automatyzacja godzinowa ma kontynuować uzasadnione poprawki i aktualizować dowody tutaj. Zakończyć cykl po spełnieniu warunków odbioru, nie po samej kompilacji.
-

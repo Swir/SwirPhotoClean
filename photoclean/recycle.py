@@ -23,6 +23,7 @@ def recycle_file(path):
         def __init__(self):
             super().__init__()
             self.error = None
+            self.recycled = False
 
         def PreDeleteItem(self, flags, item):
             if not flags & shellcon.TSF_DELETE_RECYCLE_IF_POSSIBLE:
@@ -31,9 +32,10 @@ def recycle_file(path):
             return 0
 
         def PostDeleteItem(self, flags, item, hr_delete, newly_created):
-            if hr_delete & 0x80000000:
+            if hr_delete & 0x80000000 and not self.error:
                 self.error = f"Błąd kosza Windows: {hr_delete}"
-            if newly_created:
+            if newly_created is not None:
+                self.recycled = True
                 self.newItem = newly_created.GetDisplayName(shellcon.SHGDN_FORPARSING)
 
     pythoncom.CoInitialize()
@@ -52,6 +54,8 @@ def recycle_file(path):
             raise OSError(sink.error or str(error)) from error
         if result or operation.GetAnyOperationsAborted() or sink.error:
             raise OSError(sink.error or "Windows przerwał przenoszenie do kosza.")
+        if not sink.recycled:
+            raise OSError("Windows nie zwrócił potwierdzenia umieszczenia pliku w koszu.")
         if Path(absolute).exists():
             raise OSError("Plik pozostał na miejscu; kosz nie potwierdził przeniesienia.")
     finally:

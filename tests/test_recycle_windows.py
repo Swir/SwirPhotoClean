@@ -15,8 +15,9 @@ class WindowsRecycleTests(unittest.TestCase):
             target.write_text("SWIR PhotoClean generated test data", encoding="utf-8")
             try:
                 recycle_file(target)
-            except OSError:
+            except OSError as error:
                 self.assertTrue(target.exists(), "A failed recycle operation removed the file")
+                self.assertIn("kosz", str(error).lower())
             else:
                 self.assertFalse(target.exists(), "A successful recycle operation left the source file")
 
