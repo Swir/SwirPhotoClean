@@ -94,15 +94,14 @@ def read_photo(path: Path, cancel: threading.Event) -> Photo:
             background.alpha_composite(im)
             rgb = background.convert("RGB")
             width, height = rgb.size
-            gray = list(rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).get_flattened_data())
+            gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
             bits = 0
             for y in range(8):
                 for x in range(8):
                     bits = (bits << 1) | (gray[y * 9 + x] > gray[y * 9 + x + 1])
             # Low-resolution RGB signature prevents flat, different-color images
             # with identical gradient hashes from becoming false matches.
-            pixels = rgb.resize((8, 8), Image.Resampling.LANCZOS).get_flattened_data()
-            color = bytes(channel for pixel in pixels for channel in pixel)
+            color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
     after = path.stat()
     if signature(before) != signature(after):
         raise ValueError("plik zmienił się podczas skanowania")

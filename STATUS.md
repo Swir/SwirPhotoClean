@@ -1,3 +1,7 @@
+## Poprawka 0.2.1 — 2026-09-10
+
+Usunięto zależność od Image.get_flattened_data; skanowanie korzysta z bajtów obrazu RGB/L. Test regresji symuluje brak tej metody. 25 testów przechodzi.
+
 ## Aktualizacja 0.2.0 — 2026-09-10
 
 Przestrzenny nagłówek, wypukłe przyciski, karty podglądów, powiększenie dwuklikiem. Poprawiono podgląd przezroczystości i blokadę odznaczania podczas operacji. 24 testy przechodzą, w tym powiększenie i stany przycisków. Udane przeniesienie do Kosza i przywrócenie nadal wymaga potwierdzenia w zwykłej sesji Windows. Automatyzacja godzinowa pozostaje wyłączona.

@@ -6,7 +6,7 @@
 
 Lokalna aplikacja z polskim interfejsem. Bez konta, abonamentu i wysyłania zdjęć do internetu.
 
-> Wersja 0.2.0: pierwsze wydanie testowe. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
+> Wersja 0.2.1: pierwsze wydanie testowe. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
 
 Dwuklik podglądu otwiera większy obraz; Escape zamyka powiększenie.
 
