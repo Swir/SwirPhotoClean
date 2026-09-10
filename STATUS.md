@@ -1,3 +1,9 @@
+## Aktualizacja 0.3.0 — 2026-09-10
+
+Interfejs Polski / English, wybór zapisywany w lokalnych ustawieniach użytkownika. Zmiana zachowuje wyniki, zaznaczenia, foldery i poziom podobieństwa. 29 testów przechodzi, w tym angielski układ przy skalowaniu 150%, trwałość ustawień, uszkodzony plik ustawień, nagłówki CSV i komunikaty. Samokontrola paczki sprawdza także przełączenie i ponowne uruchomienie z zapisanym językiem. Komunikaty zewnętrznych bibliotek i przyciski systemowych dialogów mogą zależeć od systemu. Historyczny raport skanowania pozostaje w języku, w którym wykonano skan.
+
+Użytkownik potwierdził poprawne działanie 0.2.1. Wydanie 0.3.0 pozostaje wydaniem testowym; szczegółowy test przywrócenia z Kosza przed 1.0 nadal wymaga potwierdzenia. Automatyzacja godzinowa jest wyłączona na życzenie użytkownika.
+
 ## Poprawka 0.2.1 — 2026-09-10
 
 Usunięto zależność od Image.get_flattened_data; skanowanie korzysta z bajtów obrazu RGB/L. Test regresji symuluje brak tej metody. 25 testów przechodzi.
@@ -42,4 +48,4 @@ Lokalny runtime dostarczony z aplikacją wymagał względnych TCL_LIBRARY/TK_LIB
 
 ## Następne kroki
 
-Najpierw zweryfikować EXE i kosz, następnie testy większych zbiorów oraz ergonomię interfejsu. Automatyzacja godzinowa ma kontynuować uzasadnione poprawki i aktualizować dowody tutaj. Zakończyć cykl po spełnieniu warunków odbioru, nie po samej kompilacji.
+Przed 1.0 potwierdzić przywracanie z Kosza i rozszerzyć testy większych zbiorów. Automatyzacja godzinowa została wyłączona na życzenie użytkownika.

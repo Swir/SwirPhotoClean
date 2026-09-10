@@ -1,6 +1,8 @@
 """Read-only scanner and guarded recycle-bin operations. No permanent deletion."""
 from __future__ import annotations
 
+from .i18n import tr
+
 import csv
 import hashlib
 import os
@@ -86,9 +88,9 @@ def read_photo(path: Path, cancel: threading.Event) -> Photo:
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(path) as source:
             if source.width * source.height > MAX_PIXELS:
-                raise ValueError("obraz przekracza limit 40 megapikseli")
+                raise ValueError(tr('obraz przekracza limit 40 megapikseli'))
             if getattr(source, "n_frames", 1) > 1:
-                raise ValueError("obraz animowany lub wielostronicowy — pominięty")
+                raise ValueError(tr('obraz animowany lub wielostronicowy — pominięty'))
             im = ImageOps.exif_transpose(source).convert("RGBA")
             background = Image.new("RGBA", im.size, "white")
             background.alpha_composite(im)
@@ -104,7 +106,7 @@ def read_photo(path: Path, cancel: threading.Event) -> Photo:
             color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
     after = path.stat()
     if signature(before) != signature(after):
-        raise ValueError("plik zmienił się podczas skanowania")
+        raise ValueError(tr('plik zmienił się podczas skanowania'))
     return Photo(path, *signature(after), digest, width, height, bits, color)
 
 
@@ -156,12 +158,12 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
     result = ScanResult()
     seen_paths, seen_inodes = set(), set()
     if not 0 <= threshold <= 16:
-        raise ValueError("Próg podobieństwa musi mieścić się w zakresie 0–16.")
+        raise ValueError(tr('Próg podobieństwa musi mieścić się w zakresie 0–16.'))
     try:
         for root in roots:
             root = Path(os.path.abspath(root))
             if not root.is_dir() or linked(root):
-                result.warnings.append(f"{root}: folder niedostępny lub dowiązanie")
+                result.warnings.append(tr('{v0}: folder niedostępny lub dowiązanie', v0=root))
                 continue
             def walk_error(error):
                 result.warnings.append(str(error))
@@ -186,17 +188,17 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
                     seen_paths.add(key)
                     try:
                         if linked(path):
-                            result.warnings.append(f"{path}: dowiązanie / plik chmurowy — pominięty")
+                            result.warnings.append(tr('{v0}: dowiązanie / plik chmurowy — pominięty', v0=path))
                             continue
                         info = path.stat()
                         inode = (info.st_dev, info.st_ino)
                         if info.st_ino and inode in seen_inodes:
-                            result.warnings.append(f"{path}: drugie dowiązanie do tego samego pliku — pominięte")
+                            result.warnings.append(tr('{v0}: drugie dowiązanie do tego samego pliku — pominięte', v0=path))
                             continue
                         photo = read_photo(path, cancel)
                         seen_inodes.add(inode)
                         result.photos.append(photo)
-                        progress(f"Odczytano {len(result.photos)} zdjęć • {name}")
+                        progress(tr('Odczytano {v0} zdjęć • {v1}', v0=len(result.photos), v1=name))
                     except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
                         result.warnings.append(f"{path}: {error}")
         exact = defaultdict(list)
@@ -210,7 +212,7 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
             for index, items in enumerate(exact.values()):
                 checkpoint(cancel)
                 photo = items[0]
-                progress(f"Porównywanie zdjęć • {index + 1}/{len(exact)}")
+                progress(tr('Porównywanie zdjęć • {v0}/{v1}', v0=index + 1, v1=len(exact)))
                 checkpoint(cancel)
                 anchor = next((candidate for candidate in tree.query(photo.dhash, threshold, cancel)
                                if similar(candidate, photo, threshold)), None)
@@ -233,20 +235,20 @@ def verify_photo(photo, cancel):
     try:
         # Validate every ancestor too, in case a folder was swapped for a junction.
         if any(linked(part) for part in (photo.path, *photo.path.parents)):
-            raise SafetyError(f"Dowiązanie w ścieżce: {photo.path}")
+            raise SafetyError(tr('Dowiązanie w ścieżce: {v0}', v0=photo.path))
         current = photo.path.stat()
         if signature(current) != (photo.size, photo.modified_ns, photo.device, photo.inode):
-            raise SafetyError(f"Plik zmienił się: {photo.path}")
+            raise SafetyError(tr('Plik zmienił się: {v0}', v0=photo.path))
         if sha256(photo.path, cancel) != photo.digest:
-            raise SafetyError(f"Zawartość pliku zmieniła się: {photo.path}")
+            raise SafetyError(tr('Zawartość pliku zmieniła się: {v0}', v0=photo.path))
     except OSError as error:
-        raise SafetyError(f"Plik niedostępny: {photo.path}: {error}") from error
+        raise SafetyError(tr('Plik niedostępny: {v0}: {v1}', v0=photo.path, v1=error)) from error
 
 
 def recycle_selected(result, selected, cancel=None, recycle=None, progress=None):
     """Validate the whole plan before disposal; recheck each target/keeper at use."""
     if result.cancelled:
-        raise SafetyError("Skan został anulowany. Uruchom pełny skan.")
+        raise SafetyError(tr('Skan został anulowany. Uruchom pełny skan.'))
     cancel = cancel or threading.Event()
     progress = progress or (lambda message: None)
     selected = {Path(p) for p in selected}
@@ -254,7 +256,7 @@ def recycle_selected(result, selected, cancel=None, recycle=None, progress=None)
         return [], []
     known = {p.path: p for group in result.groups for p in group.photos}
     if selected - known.keys():
-        raise SafetyError("Zaznaczenie zawiera plik spoza wyników.")
+        raise SafetyError(tr('Zaznaczenie zawiera plik spoza wyników.'))
     keepers = {}
     check = {}
     for group in result.groups:
@@ -264,14 +266,14 @@ def recycle_selected(result, selected, cancel=None, recycle=None, progress=None)
             continue
         remaining = [p for p in group.photos if p.path not in selected]
         if not remaining:
-            raise SafetyError("Zostaw co najmniej jedno zdjęcie w każdej grupie.")
+            raise SafetyError(tr('Zostaw co najmniej jedno zdjęcie w każdej grupie.'))
         keeper = remaining[0]
         check[keeper.path] = keeper
         for path in targets:
             keepers.setdefault(path, []).append(keeper)
             check[path] = known[path]
     for photo in check.values():
-        progress(f"Sprawdzanie przed przeniesieniem • {photo.path.name}")
+        progress(tr('Sprawdzanie przed przeniesieniem • {v0}', v0=photo.path.name))
         verify_photo(photo, cancel)
     if recycle is None:
         from .recycle import recycle_file
@@ -285,9 +287,9 @@ def recycle_selected(result, selected, cancel=None, recycle=None, progress=None)
             verify_photo(known[path], cancel)
             recycle(str(path))  # never fall back to unlink/remove
             completed.append(path)
-            progress(f"Przeniesiono do kosza • {path.name}")
+            progress(tr('Przeniesiono do kosza • {v0}', v0=path.name))
         except Cancelled:
-            failed.append("Operacja przerwana; część plików mogła już trafić do kosza.")
+            failed.append(tr('Operacja przerwana; część plików mogła już trafić do kosza.'))
             break
         except Exception as error:
             failed.append(f"{path}: {error}")
@@ -301,7 +303,7 @@ def export_csv(result, destination):
         return "'" + text if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
     with Path(destination).open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream, delimiter=";")
-        writer.writerow(["Grupa", "Typ", "Ścieżka", "Bajty", "Szerokość", "Wysokość", "SHA256"])
+        writer.writerow([tr('Grupa'), tr('Typ'), tr('Ścieżka'), tr('Bajty'), tr('Szerokość'), tr('Wysokość'), "SHA256"])
         for index, group in enumerate(result.groups, 1):
             for photo in group.photos:
                 writer.writerow(map(safe, [index, group.kind, photo.path, photo.size, photo.width, photo.height, photo.digest]))

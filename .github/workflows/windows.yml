@@ -35,3 +35,29 @@ jobs:
           name: SwirPhotoClean-windows-portable
           path: dist/SwirPhotoClean/
           if-no-files-found: error
+  release:
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:')
+    needs: windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: SwirPhotoClean-windows-portable
+          path: package/SwirPhotoClean
+      - name: Publish tested portable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Select-String -Path photoclean/__init__.py -Pattern '__version__ = "([^"]+)"').Matches.Groups[1].Value
+          if (-not $version) { throw 'Missing version' }
+          Copy-Item README.md, RELEASE_NOTES.md, STATUS.md package/SwirPhotoClean/
+          $archive = "SwirPhotoClean-$version-Windows.zip"
+          Compress-Archive -Path package/SwirPhotoClean -DestinationPath $archive
+          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          "$digest  $archive" | Set-Content "$archive.sha256" -Encoding utf8
+          gh release create "v$version" $archive "$archive.sha256" --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

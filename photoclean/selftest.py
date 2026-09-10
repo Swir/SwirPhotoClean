@@ -23,7 +23,7 @@ def run(destination):
             assert len(result.groups) == 1
             root = tk.Tk()
             root.withdraw()
-            app = PhotoCleanApp(root)
+            app = PhotoCleanApp(root, Path(folder) / 'settings.json')
             app.result = result
             app.render_groups()
             root.update()
@@ -32,8 +32,19 @@ def run(destination):
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
+            app.language_var.set('English')
+            app.change_language()
+            root.update_idletasks()
+            assert app.scan_button['text'] == 'Scan photos'
+            assert len(app.marked) == 1
             root.after_cancel(app.poll_id)
-            report = {"ok": True, "exact_groups": 1, "previews": 2, "recycle_executed": False}
+            root.destroy()
+            root = tk.Tk()
+            root.withdraw()
+            app = PhotoCleanApp(root, Path(folder) / 'settings.json')
+            assert app.language_var.get() == 'English'
+            root.after_cancel(app.poll_id)
+            report = {"ok": True, "exact_groups": 1, "previews": 2, "languages": ["pl", "en"], "language_persistence": True, "recycle_executed": False}
     except Exception as error:
         report["error"] = repr(error)
     finally:

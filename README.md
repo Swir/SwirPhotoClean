@@ -4,9 +4,13 @@
 
 **Znajdź duplikaty i podobne zdjęcia na Windows. Porównaj je i odzyskaj miejsce.**
 
-Lokalna aplikacja z polskim interfejsem. Bez konta, abonamentu i wysyłania zdjęć do internetu.
+Lokalna aplikacja z interfejsem **Polski / English**. Bez konta, abonamentu i wysyłania zdjęć do internetu.
 
-> Wersja 0.2.1: pierwsze wydanie testowe. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
+> Wersja 0.3.0: wydanie testowe z wyborem języka. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
+
+Pobierz paczkę Windows z [GitHub Releases](https://github.com/Swir/SwirPhotoClean/releases). Rozpakuj cały ZIP i uruchom `SwirPhotoClean.exe` w folderze aplikacji.
+
+Język zmienisz w prawym górnym rogu okna. Wybór jest zapisywany lokalnie w `%LOCALAPPDATA%/SwirPhotoClean/settings.json`. Zmiana zachowuje wyniki, foldery i zaznaczenia; jest dostępna po zakończeniu bieżącej operacji. Systemowe przyciski okien dialogowych zależą od języka Windows.
 
 Dwuklik podglądu otwiera większy obraz; Escape zamyka powiększenie.
 
@@ -60,7 +64,9 @@ py -3.12 -m venv .venv
 
 ## English
 
-SWIR PhotoClean is a local **Windows duplicate photo finder and similar image finder** with a Polish interface. Scan multiple folders, compare images side by side, review dimensions and sizes, export a CSV report and manually move selected copies to the Windows Recycle Bin. No account or cloud upload is required.
+SWIR PhotoClean is a local **Windows duplicate photo finder and similar image finder** with **English and Polish interfaces**. Scan multiple folders, compare images side by side, review dimensions and sizes, export a CSV report and manually move selected copies to the Windows Recycle Bin. No account or cloud upload is required.
+
+Download the Windows ZIP from [Releases](https://github.com/Swir/SwirPhotoClean/releases), extract the entire archive and launch `SwirPhotoClean.exe`. Choose **English** at the top right. The app remembers your choice between launches. Windows controls its native dialog button language.
 
 Exact matches use full-file SHA-256. Similarity uses gradient hashes, aspect ratios and a low-resolution color comparison. Similar matches require human review. The app never automatically selects photos for disposal and prevents selecting every member of a group.
 
