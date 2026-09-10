@@ -53,8 +53,14 @@ class GuiTests(unittest.TestCase):
                     warn.assert_called_once()
                 self.assertEqual(len(app.marked), 1)
                 app.set_busy(True)
+                app.clear_marks()
+                self.assertEqual(len(app.marked), 1)
                 self.assertEqual(str(app.trash_button["state"]), "disabled")
                 app.set_busy(False)
+                app.open_preview(0)
+                windows = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
+                self.assertEqual(len(windows), 1)
+                windows[0].destroy()
                 app.clear_marks()
                 self.assertFalse(app.marked)
         finally:

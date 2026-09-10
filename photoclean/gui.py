@@ -14,7 +14,7 @@ from PIL import Image, ImageOps, ImageTk
 from . import __version__
 from .core import MAX_PIXELS, ScanResult, export_csv, recycle_selected, scan
 
-BG, PANEL, TEXT, MUTED, ACCENT = "#101723", "#192436", "#eef4ff", "#aebdd1", "#49d4bd"
+BG, PANEL, TEXT, MUTED, ACCENT = "#0b1020", "#151f35", "#eef4ff", "#9eafcb", "#62ead1"
 
 
 def bundled_asset(name):
@@ -57,28 +57,40 @@ class PhotoCleanApp:
         style.configure("TLabel", background=BG, foreground=TEXT)
         style.configure("Muted.TLabel", foreground=MUTED)
         style.configure("Title.TLabel", font=("Segoe UI", 22, "bold"))
-        style.configure("TButton", background=PANEL, padding=(10, 6), borderwidth=0)
+        style.configure("TButton", background=PANEL, padding=(10, 6), borderwidth=2, relief="raised", lightcolor="#344764", darkcolor="#060a13", bordercolor="#273852")
         style.map("TButton", background=[("active", "#2b405a")], foreground=[("disabled", "#76869a")])
         style.configure("Accent.TButton", background=ACCENT, foreground=BG, font=("Segoe UI", 10, "bold"))
         style.map("Accent.TButton", background=[("active", "#77e7d4"), ("disabled", PANEL)])
         style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT, rowheight=28, borderwidth=0)
-        style.configure("Treeview.Heading", background="#22324a", foreground=TEXT, padding=6)
+        style.configure("Treeview.Heading", background="#22324a", foreground=MUTED, padding=6, relief="flat")
+        style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor=PANEL, borderwidth=0, thickness=5)
+        style.map("TCombobox", fieldbackground=[("readonly", PANEL)], foreground=[("readonly", TEXT)])
         style.map("Treeview", background=[("selected", "#315b78")])
         style.configure("TCheckbutton", background=BG)
         style.map("TCheckbutton", background=[("active", BG)])
         style.configure("TCombobox", fieldbackground=PANEL, foreground=TEXT)
         outer = ttk.Frame(root, padding=(16, 10))
         outer.pack(fill="both", expand=True)
-        header = ttk.Frame(outer)
-        header.pack(fill="x")
-        ttk.Label(header, text="SWIR PhotoClean", style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text="LOKALNIE  •  BEZ ABONAMENTU", foreground=ACCENT).pack(side="right")
-        ttk.Label(outer, text="Odzyskaj miejsce. Porównaj zdjęcia. Zachowaj te, które chcesz.", style="Muted.TLabel").pack(anchor="w", pady=(0, 7))
+        header = tk.Canvas(outer, height=92, bg=BG, highlightthickness=0)
+        header.pack(fill="x", pady=(0, 8))
+        def draw_header(event):
+            header.delete("all")
+            w = event.width
+            header.create_rectangle(4, 5, w, 92, fill="#050812", outline="")
+            header.create_rectangle(0, 0, w-5, 86, fill="#172440", outline="#344866")
+            header.create_line(1, 1, w-6, 1, fill="#577193")
+            header.create_text(22, 27, text="SWIR PhotoClean", anchor="w", fill=TEXT, font=("Segoe UI", 22, "bold"))
+            header.create_text(23, 62, text="Mniej kopii. Więcej miejsca na wspomnienia.", anchor="w", fill=MUTED, font=("Segoe UI", 10))
+            if w > 720:
+                for x,y,c in [(w-151,18,"#263b61"),(w-135,27,"#3a5880"),(w-119,36,"#62ead1")]:
+                    header.create_polygon(x,y,x+61,y-6,x+69,y+34,x+8,y+40, fill=c, outline="#86ffee")
+                header.create_text(w-184, 42, text="100% lokalnie", anchor="e", fill=ACCENT, font=("Segoe UI", 10, "bold"))
+        header.bind("<Configure>", draw_header)
         toolbar = ttk.Frame(outer)
         toolbar.pack(fill="x")
         self.add_button = ttk.Button(toolbar, text="+ Dodaj folder", command=self.add_folder)
         self.add_button.pack(side="left", padx=(0, 8))
-        self.remove_button = ttk.Button(toolbar, text="Usuń folder z listy", command=self.remove_folder)
+        self.remove_button = ttk.Button(toolbar, text="Usuń z listy", command=self.remove_folder)
         self.remove_button.pack(side="left")
         self.similarity = tk.BooleanVar(value=True)
         self.sim_check = ttk.Checkbutton(toolbar, text="Szukaj też podobnych", variable=self.similarity)
@@ -88,12 +100,12 @@ class PhotoCleanApp:
         self.level_box.pack(side="left")
         self.scan_button = ttk.Button(toolbar, text="Skanuj zdjęcia", style="Accent.TButton", command=self.start_scan)
         self.scan_button.pack(side="right")
-        self.folders = tk.Listbox(outer, height=2, bg=PANEL, fg=TEXT, selectbackground="#315b78", relief="flat", font=("Segoe UI", 10), exportselection=False)
+        self.folders = tk.Listbox(outer, height=1, bg=PANEL, fg=TEXT, selectbackground="#315b78", relief="flat", font=("Segoe UI", 10), exportselection=False)
         self.folders.pack(fill="x", pady=(6, 4))
         status_row = ttk.Frame(outer)
         status_row.pack(fill="x", pady=(0, 4))
         self.status = tk.StringVar(value="Dodaj foldery ze zdjęciami. Skanowanie niczego nie usuwa.")
-        ttk.Label(status_row, textvariable=self.status, style="Muted.TLabel", wraplength=900).pack(side="left")
+        ttk.Label(status_row, textvariable=self.status, style="Muted.TLabel").pack(side="left", fill="x", expand=True)
         self.cancel_button = ttk.Button(status_row, text="Anuluj", command=self.cancel.set, state="disabled")
         self.cancel_button.pack(side="right")
         self.bar = ttk.Progressbar(outer, mode="indeterminate")
@@ -114,7 +126,7 @@ class PhotoCleanApp:
         scrollbar.pack(side="right", fill="y")
         self.groups.configure(yscrollcommand=scrollbar.set)
         self.groups.bind("<<TreeviewSelect>>", self.choose_group)
-        ttk.Label(right, text="Wybierz do dwóch wierszy do porównania (Ctrl + klik).", style="Muted.TLabel").pack(anchor="w", padx=12)
+        ttk.Label(right, text="PORÓWNAJ  •  Ctrl + klik: dwa zdjęcia  •  dwuklik podglądu: powiększenie", style="Muted.TLabel").pack(anchor="w", padx=12)
         file_frame = ttk.Frame(right, padding=(12, 8, 0, 0))
         file_frame.pack(fill="x")
         self.files = ttk.Treeview(file_frame, columns=("marked", "name", "pixels", "size"), show="headings", height=3, selectmode="extended")
@@ -140,9 +152,10 @@ class PhotoCleanApp:
         self.preview_panels = []
         for col in range(2):
             self.preview_frame.columnconfigure(col, weight=1, uniform="preview")
-            panel = ttk.Frame(self.preview_frame)
+            panel = tk.Frame(self.preview_frame, bg="#080d19", bd=3, relief="raised", highlightbackground="#30435f", highlightthickness=1)
             panel.grid(row=0, column=col, sticky="nsew", padx=4)
-            label = ttk.Label(panel, text="Wybierz zdjęcie", anchor="center", background=PANEL)
+            label = ttk.Label(panel, text="◇\n\nWybierz zdjęcie do porównania", anchor="center", justify="center", background=PANEL, foreground=MUTED)
+            label.bind("<Double-1>", lambda event, slot=col: self.open_preview(slot))
             label.pack(fill="both", expand=True)
             detail = ttk.Label(panel, text="", style="Muted.TLabel", anchor="w")
             detail.pack(fill="x", pady=(3, 0))
@@ -272,7 +285,7 @@ class PhotoCleanApp:
         self.images.clear()
         chosen = self.files.selection()[:2] if self.active_group else ()
         for index, (label, detail) in enumerate(self.preview_panels):
-            label.configure(image="", text="Wybierz zdjęcie")
+            label.configure(image="", text="◇\n\nWybierz zdjęcie do porównania")
             detail.configure(text="")
             if index >= len(chosen):
                 continue
@@ -281,8 +294,11 @@ class PhotoCleanApp:
                 with Image.open(photo.path) as source:
                     if source.width * source.height > MAX_PIXELS:
                         raise ValueError("Obraz przekracza limit podglądu")
-                    im = ImageOps.exif_transpose(source).convert("RGB")
-                    im.thumbnail((240, 120), Image.Resampling.LANCZOS)
+                    im = ImageOps.exif_transpose(source).convert("RGBA")
+                    background = Image.new("RGBA", im.size, "white")
+                    background.alpha_composite(im)
+                    im = background.convert("RGB")
+                    im.thumbnail((max(240, label.winfo_width()-16), max(120, label.winfo_height()-16)), Image.Resampling.LANCZOS)
                 image = ImageTk.PhotoImage(im)
                 self.images.append(image)
                 label.configure(image=image, text="")
@@ -292,6 +308,32 @@ class PhotoCleanApp:
             if len(name) > 20:
                 name = f"{name[:9]}…{name[-8:]}"
             detail.configure(text=f"{name} • {photo.width}×{photo.height} • {human_size(photo.size)}")
+
+    def open_preview(self, slot):
+        chosen = self.files.selection()[:2] if self.active_group else ()
+        if slot >= len(chosen):
+            return
+        photo = self.active_group.photos[int(chosen[slot])]
+        try:
+            with Image.open(photo.path) as source:
+                if source.width * source.height > MAX_PIXELS:
+                    raise ValueError("Obraz przekracza limit podglądu")
+                im = ImageOps.exif_transpose(source).convert("RGBA")
+                background = Image.new("RGBA", im.size, "white")
+                background.alpha_composite(im)
+                im = background.convert("RGB")
+                im.thumbnail((self.root.winfo_screenwidth()-160, self.root.winfo_screenheight()-220), Image.Resampling.LANCZOS)
+            window = tk.Toplevel(self.root)
+            window.title(photo.path.name)
+            window.configure(bg=BG)
+            picture = ImageTk.PhotoImage(im)
+            label = ttk.Label(window, image=picture, background=BG)
+            label.image = picture
+            label.pack(padx=16, pady=16)
+            ttk.Label(window, text=str(photo.path), wraplength=800).pack(padx=16, pady=(0, 10))
+            window.bind("<Escape>", lambda event: window.destroy())
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Podgląd niedostępny", str(error))
 
     def copy_selected_paths(self):
         if not self.active_group:
@@ -319,6 +361,8 @@ class PhotoCleanApp:
         self.update_summary()
 
     def clear_marks(self):
+        if self.busy:
+            return
         self.marked.clear()
         for i in self.files.get_children():
             self.files.set(i, "marked", "—")

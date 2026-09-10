@@ -6,7 +6,9 @@
 
 Lokalna aplikacja z polskim interfejsem. Bez konta, abonamentu i wysyłania zdjęć do internetu.
 
-> Wersja 0.1.0: pierwsze wydanie testowe. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
+> Wersja 0.2.0: pierwsze wydanie testowe. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
+
+Dwuklik podglądu otwiera większy obraz; Escape zamyka powiększenie.
 
 ## Funkcje
 
@@ -53,6 +55,7 @@ py -3.12 -m venv .venv
 - Podobne zdjęcia mogą być różnymi ujęciami. Obrót bez EXIF, duże kadrowanie i znaczne zmiany kolorów mogą nie zostać wykryte.
 - Grupa podobieństwa porównuje zdjęcia ze stałym zdjęciem bazowym; nie wszystkie pary w grupie muszą być równie podobne. Grupy identyczne i podobne mogą się częściowo pokrywać.
 - Przy pierwszym błędzie kosza przenoszenie jest zatrzymywane. Wcześniejsze udane operacje nie są automatycznie cofane.
+- Program wymaga jednoznacznego potwierdzenia systemu, że plik trafi do Kosza i że po operacji powstał tam nowy element. Jeżeli polityka Windows lub środowisko izolowane nie zapewnia takiego potwierdzenia, plik pozostaje na miejscu.
 - Nie edytuj i nie synchronizuj aktywnie skanowanych folderów podczas przenoszenia. Program ponownie sprawdza pliki, ale nie blokuje innych aplikacji przed zmianami.
 
 ## English
