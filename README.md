@@ -1,33 +1,210 @@
+<div align="center">
+
+<img src="assets/SwirPhotoClean.png" width="150" alt="SwirPhotoClean logo">
+
 # SWIR PhotoClean
 
-<img src="assets/SwirPhotoClean.png" width="160" alt="Ikona SWIR PhotoClean">
+### Fast duplicate photo finder & similar image finder for Windows
 
-**Znajdź duplikaty i podobne zdjęcia na Windows. Porównaj je i odzyskaj miejsce.**
+Find duplicate photos, detect visually similar images, compare them side by side and safely recover disk space — **locally, without uploading your photos anywhere**.
 
-Lokalna aplikacja z interfejsem **Polski / English**. Bez konta, abonamentu i wysyłania zdjęć do internetu.
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Swir/SwirPhotoClean)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Local processing](https://img.shields.io/badge/Processing-100%25%20Local-success)](https://github.com/Swir/SwirPhotoClean)
+[![Languages](https://img.shields.io/badge/UI-English%20%7C%20Polski-blueviolet)](https://github.com/Swir/SwirPhotoClean)
+[![Release](https://img.shields.io/github/v/release/Swir/SwirPhotoClean?display_name=tag&sort=semver)](https://github.com/Swir/SwirPhotoClean/releases)
 
-> Wersja 0.3.0: wydanie testowe z wyborem języka. Podobieństwo jest wskazówką do ręcznego porównania, nie potwierdzeniem, że można usunąć zdjęcie.
+[Download for Windows](https://github.com/Swir/SwirPhotoClean/releases) · [Report a bug](https://github.com/Swir/SwirPhotoClean/issues) · [Project status](STATUS.md)
 
-Pobierz paczkę Windows z [GitHub Releases](https://github.com/Swir/SwirPhotoClean/releases). Rozpakuj cały ZIP i uruchom `SwirPhotoClean.exe` w folderze aplikacji.
+</div>
 
-Język zmienisz w prawym górnym rogu okna. Wybór jest zapisywany lokalnie w `%LOCALAPPDATA%/SwirPhotoClean/settings.json`. Zmiana zachowuje wyniki, foldery i zaznaczenia; jest dostępna po zakończeniu bieżącej operacji. Systemowe przyciski okien dialogowych zależą od języka Windows.
+---
 
-Dwuklik podglądu otwiera większy obraz; Escape zamyka powiększenie.
+## Why SwirPhotoClean?
 
-## Funkcje
+Photo libraries quickly fill up with copied downloads, exported versions, messenger duplicates, edited images and nearly identical shots. SwirPhotoClean is a **Windows duplicate photo finder**, **duplicate image finder** and **similar photo finder** designed to help you review those files safely before removing anything.
 
-- Wiele folderów i skanowanie podfolderów w tle; przycisk anulowania.
-- **Identyczne pliki:** porównanie SHA-256 całej zawartości.
-- **Podobne zdjęcia:** różnicowy hash obrazu, proporcje i porównanie kolorów. Trzy poziomy czułości.
-- Podgląd dwóch zdjęć obok siebie, wymiary i rozmiary; pełne ścieżki można skopiować jednym przyciskiem.
-- Ręczne zaznaczanie plików do systemowego kosza. Brak automatycznego zaznaczania.
-- Blokada zaznaczenia wszystkich zdjęć w dowolnej grupie.
-- Ponowne sprawdzenie zawartości i metadanych wybranych plików oraz zachowywanych kopii przed operacją.
-- Raport pominiętych plików i eksport wyników do CSV czytelnego w Excelu.
+The application works locally on your PC. It does **not** require an account, subscription or cloud upload.
 
-## Uruchomienie ze źródeł
+### Highlights
 
-Windows 10/11, Python **3.12** z oficjalnego instalatora python.org (włączony Tcl/Tk).
+| Feature | What it does |
+|---|---|
+| **Exact duplicate detection** | Uses full-file **SHA-256** comparison to identify identical files. |
+| **Similar image detection** | Uses image hashes, aspect ratio and low-resolution colour comparison to find visually similar photos. |
+| **Side-by-side comparison** | Compare two images with dimensions, file sizes and full paths. |
+| **Multiple folders** | Scan several folders and their subfolders in one session. |
+| **Safe manual cleanup** | Nothing is automatically selected for deletion. You decide what goes to the Windows Recycle Bin. |
+| **Protection against mistakes** | The app prevents selecting every image from the same result group. |
+| **CSV export** | Export scan results for Excel or further review. |
+| **Bilingual interface** | Switch between **English** and **Polski**. |
+| **Local & private** | Images stay on your computer during analysis. |
+
+---
+
+## What can it find?
+
+SwirPhotoClean can help detect:
+
+- exact duplicate photos,
+- copied images stored in different folders,
+- renamed duplicates,
+- visually similar photos,
+- alternate exports of the same image,
+- near-duplicate pictures with small visual differences,
+- repeated downloads,
+- photo collections that may be wasting disk space.
+
+Typical searches this project is useful for include **find duplicate photos Windows 11**, **remove duplicate pictures**, **similar image finder**, **duplicate JPG finder**, **photo deduplication tool**, **offline photo cleaner** and **duplicate image remover for Windows**.
+
+> Similarity results are suggestions for manual review. Two photos marked as similar are not automatically safe to delete.
+
+---
+
+## Download
+
+Go to **[GitHub Releases](https://github.com/Swir/SwirPhotoClean/releases)** and download the latest Windows ZIP package.
+
+1. Download the release ZIP.
+2. Extract the **entire archive**.
+3. Open the extracted folder.
+4. Run `SwirPhotoClean.exe`.
+
+Do not move only the EXE file out of the application folder — keep the complete extracted package together.
+
+### System requirements
+
+- Windows 10 or Windows 11
+- 64-bit system recommended
+- No account required
+- No online photo upload required
+
+---
+
+## How to use
+
+1. Click **Add folder** / **Dodaj folder**.
+2. Add one or more folders you want to scan.
+3. Enable similar-photo detection if needed.
+4. Choose a similarity sensitivity level. **Standard** is a good starting point.
+5. Click **Scan photos** / **Skanuj zdjęcia**.
+6. Select a result group from the left panel.
+7. Select up to two images with `Ctrl` to compare them side by side.
+8. Review the image, size, dimensions and path carefully.
+9. Mark individual files with **Mark / unmark for Recycle Bin**.
+10. Click **Move selected to Recycle Bin** and confirm the list.
+
+Files are moved to the normal Windows Recycle Bin when the operating system confirms that the operation is safe. SwirPhotoClean does not empty the Recycle Bin automatically.
+
+---
+
+## Exact duplicates vs similar photos
+
+### Exact duplicates
+
+Exact duplicate detection compares the full contents of each file using **SHA-256**. Files must match byte-for-byte to be classified as identical.
+
+This is useful for finding:
+
+- copied files,
+- renamed copies,
+- the same image stored in multiple folders.
+
+### Similar photos
+
+Similar-photo detection uses several lightweight visual signals, including:
+
+- gradient / difference-based image hashes,
+- aspect ratio,
+- low-resolution colour comparison.
+
+This can detect images that look alike even when their files are not identical.
+
+Examples include resized exports, slightly edited versions and similar shots from a photo series.
+
+Because visual similarity is subjective, **all similar-image results require human review**.
+
+---
+
+## Privacy & safety
+
+SwirPhotoClean is built around a local-first workflow.
+
+- No user account is required.
+- Photos are processed locally.
+- The application does not automatically choose photos for removal.
+- Selected files are rechecked before the move operation.
+- The app protects against marking every image in a result group.
+- Files are moved to the Windows Recycle Bin instead of being permanently erased.
+- The operation stops when the Recycle Bin action cannot be reliably confirmed.
+
+For important photo libraries, keeping a backup is always recommended before large cleanup operations.
+
+---
+
+## Supported image formats
+
+Supported:
+
+- JPG / JPEG
+- PNG
+- WebP
+- BMP
+- single-image TIFF
+- single-image GIF
+
+Currently not supported:
+
+- HEIC
+- RAW camera formats
+- animated images
+- multi-page image files
+
+Images above **40 megapixels** are skipped and reported.
+
+---
+
+## Important limitations
+
+- Similar photos can still be completely different photos that only look alike.
+- Large crops, strong colour changes or rotation without usable EXIF information may reduce similarity detection accuracy.
+- Similarity groups are created around a reference image, so not every pair inside one group must be equally similar.
+- Exact and similar-result groups can overlap.
+- Reparse points, junctions and some cloud-placeholder files are skipped.
+- A hardlink to an already-read file is not counted as another independent copy.
+- Network and removable drives may be scanned, but Recycle Bin operations from them are blocked.
+- Do not actively edit or synchronize scanned folders while moving files.
+
+The **“To Recycle Bin”** size is the sum of selected file sizes. It is not guaranteed free space until the Windows Recycle Bin is emptied.
+
+---
+
+## Language
+
+The application interface is available in:
+
+- 🇬🇧 English
+- 🇵🇱 Polski
+
+Use the language selector in the top-right corner of the application.
+
+The selected language is stored locally in:
+
+```text
+%LOCALAPPDATA%\SwirPhotoClean\settings.json
+```
+
+Changing the interface language keeps your current scan results, selected folders and marked files.
+
+---
+
+## Run from source
+
+Requirements:
+
+- Windows 10/11
+- Python **3.12** from python.org
+- Tcl/Tk enabled in the Python installation
 
 ```powershell
 git clone https://github.com/Swir/SwirPhotoClean.git
@@ -37,53 +214,93 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe run.py
 ```
 
-## Jak używać
+---
 
-1. Kliknij **Dodaj folder**. Możesz dodać więcej niż jeden.
-2. Wybierz, czy szukać również podobnych zdjęć. Zacznij od poziomu Standardowego.
-3. Kliknij **Skanuj zdjęcia** i poczekaj na zakończenie.
-4. Wybierz grupę po lewej. Zaznacz do dwóch wierszy z użyciem Ctrl, aby porównać obrazy.
-5. W razie potrzeby kliknij **Kopiuj ścieżkę**, aby skopiować pełne położenie wybranych zdjęć.
-6. Wybierz pojedynczy plik i kliknij **Zaznacz / odznacz do kosza**. Kolumna „Do kosza” pokaże TAK. Sam wybór wiersza do podglądu niczego nie zaznacza do usunięcia.
-7. Kliknij **Przenieś zaznaczone do kosza**, sprawdź listę i potwierdź.
-8. Pliki można przywrócić przez systemowy Kosz Windows. Po przenoszeniu wykonaj nowy skan.
+## Tests
 
-„Do kosza” pokazuje sumę rozmiarów zaznaczonych plików, nie gwarantowaną ilość wolnego miejsca. Pliki w koszu nadal zajmują miejsce; aplikacja nie opróżnia kosza.
-
-## Obsługiwane pliki i ograniczenia
-
-- JPG/JPEG, PNG, WebP, BMP oraz pojedyncze obrazy TIFF/GIF.
-- HEIC, RAW, animacje i wielostronicowe pliki nie są obsługiwane. Obrazy powyżej 40 megapikseli są pomijane i raportowane.
-- Dowiązania, junctions i pliki z atrybutem reparse (w tym część plików chmurowych) są pomijane. Hardlink do już odczytanego pliku nie jest liczony jako kolejna kopia.
-- Kosz działa wyłącznie na lokalnych dyskach stałych w Windows. Dyski sieciowe i wymienne mogą być skanowane, ale przenoszenie z nich jest blokowane.
-- Podobne zdjęcia mogą być różnymi ujęciami. Obrót bez EXIF, duże kadrowanie i znaczne zmiany kolorów mogą nie zostać wykryte.
-- Grupa podobieństwa porównuje zdjęcia ze stałym zdjęciem bazowym; nie wszystkie pary w grupie muszą być równie podobne. Grupy identyczne i podobne mogą się częściowo pokrywać.
-- Przy pierwszym błędzie kosza przenoszenie jest zatrzymywane. Wcześniejsze udane operacje nie są automatycznie cofane.
-- Program wymaga jednoznacznego potwierdzenia systemu, że plik trafi do Kosza i że po operacji powstał tam nowy element. Jeżeli polityka Windows lub środowisko izolowane nie zapewnia takiego potwierdzenia, plik pozostaje na miejscu.
-- Nie edytuj i nie synchronizuj aktywnie skanowanych folderów podczas przenoszenia. Program ponownie sprawdza pliki, ale nie blokuje innych aplikacji przed zmianami.
-
-## English
-
-SWIR PhotoClean is a local **Windows duplicate photo finder and similar image finder** with **English and Polish interfaces**. Scan multiple folders, compare images side by side, review dimensions and sizes, export a CSV report and manually move selected copies to the Windows Recycle Bin. No account or cloud upload is required.
-
-Download the Windows ZIP from [Releases](https://github.com/Swir/SwirPhotoClean/releases), extract the entire archive and launch `SwirPhotoClean.exe`. Choose **English** at the top right. The app remembers your choice between launches. Windows controls its native dialog button language.
-
-Exact matches use full-file SHA-256. Similarity uses gradient hashes, aspect ratios and a low-resolution color comparison. Similar matches require human review. The app never automatically selects photos for disposal and prevents selecting every member of a group.
-
-## Testy i budowanie EXE
+Run the automated test suite with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+---
+
+## Build the Windows EXE
+
+Install build dependencies:
+
+```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+```
+
+Build with PyInstaller:
+
+```powershell
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean --icon assets/SwirPhotoClean.ico --add-data "assets;assets" run.py
 ```
 
-Uruchom `dist/SwirPhotoClean/SwirPhotoClean.exe`. Do przenoszenia aplikacji skopiuj **cały folder** `dist/SwirPhotoClean`, nie sam plik EXE.
+The application will be created in:
 
-Automatyzacja GitHub Actions testuje kod na Windows i buduje paczkę ZIP jako artefakt. Artefakt kompilacji nie oznacza automatycznie zatwierdzonego wydania. Aktualny zakres weryfikacji: [STATUS.md](STATUS.md).
+```text
+dist\SwirPhotoClean\
+```
 
-## Zgłaszanie problemów
+Run:
 
-Otwórz [Issues](https://github.com/Swir/SwirPhotoClean/issues). Podaj wersję Windows i aplikacji, kroki odtworzenia, typ pliku i komunikat błędu. Dołączaj tylko zdjęcia, które możesz publicznie udostępnić.
+```text
+dist\SwirPhotoClean\SwirPhotoClean.exe
+```
 
-Autor: [Swir](https://github.com/Swir) · [Pozostałe programy](https://github.com/Swir#readme)
+When copying the built application to another computer, copy the **whole `SwirPhotoClean` folder**, not only the EXE.
+
+GitHub Actions also tests the project on Windows and builds a ZIP artifact. A CI build artifact is not automatically considered a stable release. See **[STATUS.md](STATUS.md)** for the current verification status.
+
+---
+
+## Search terms / discoverability
+
+<details>
+<summary>Common keywords related to SwirPhotoClean</summary>
+
+<br>
+
+`duplicate photo finder` · `duplicate image finder` · `duplicate photo remover` · `similar image finder` · `similar photo finder` · `photo duplicate cleaner` · `Windows duplicate photos` · `Windows 11 duplicate photo finder` · `find duplicate pictures` · `remove duplicate photos` · `find similar images` · `photo cleaner Windows` · `offline photo cleaner` · `local duplicate finder` · `image deduplication` · `photo deduplication` · `duplicate JPG finder` · `duplicate PNG finder` · `duplicate image scanner` · `photo organizer` · `disk space cleaner photos` · `Python duplicate image finder` · `SHA-256 duplicate finder` · `perceptual image hash` · `image similarity checker`
+
+</details>
+
+---
+
+## Reporting bugs
+
+Found a problem? Open an issue:
+
+**https://github.com/Swir/SwirPhotoClean/issues**
+
+Please include:
+
+- SwirPhotoClean version,
+- Windows version,
+- steps to reproduce the issue,
+- image format involved,
+- relevant error message.
+
+Only attach photos that you are allowed to share publicly.
+
+---
+
+## Version
+
+Current README documentation targets **SwirPhotoClean 0.3.0**.
+
+This is still a test-stage release. Similar-image detection should be treated as an aid for manual comparison, not as an automatic deletion decision.
+
+---
+
+## Autor / Author
+
+Created by **[Swir](https://github.com/Swir)**.
+
+More projects: **[github.com/Swir](https://github.com/Swir)**
+
+If SwirPhotoClean is useful to you, consider leaving a ⭐ on the repository — it helps other users discover the project.
