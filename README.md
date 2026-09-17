@@ -1,210 +1,78 @@
+<!-- SWIR-README-STANDARD:v2 -->
+
 <div align="center">
 
-<img src="assets/SwirPhotoClean.png" width="150" alt="SwirPhotoClean logo">
+<img width="100%" src="assets/readme/hero.svg" alt="SWIR PhotoClean — local duplicate and similar photo finder for Windows" />
 
 # SWIR PhotoClean
 
-### Fast duplicate photo finder & similar image finder for Windows
+**Find duplicate and visually similar photos locally, compare them and review cleanup safely.**
 
-Find duplicate photos, detect visually similar images, compare them side by side and safely recover disk space — **locally, without uploading your photos anywhere**.
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-02050A?style=for-the-badge&logo=windows11&logoColor=62E5FF)
+![Python](https://img.shields.io/badge/Python-3.12-02050A?style=for-the-badge&logo=python&logoColor=62E5FF)
+![Processing](https://img.shields.io/badge/Processing-Local-02050A?style=for-the-badge&logoColor=62E5FF)
+![Preview](https://img.shields.io/badge/Preview-v0.3.0-02050A?style=for-the-badge&logo=github&logoColor=62E5FF)
 
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Swir/SwirPhotoClean)
-[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Local processing](https://img.shields.io/badge/Processing-100%25%20Local-success)](https://github.com/Swir/SwirPhotoClean)
-[![Languages](https://img.shields.io/badge/UI-English%20%7C%20Polski-blueviolet)](https://github.com/Swir/SwirPhotoClean)
-[![Release](https://img.shields.io/github/v/release/Swir/SwirPhotoClean?display_name=tag&sort=semver)](https://github.com/Swir/SwirPhotoClean/releases)
+[![Author](https://img.shields.io/badge/by-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
+[![Stars](https://img.shields.io/github/stars/Swir/SwirPhotoClean?style=flat-square&color=0088FF)](https://github.com/Swir/SwirPhotoClean/stargazers)
 
-[Download for Windows](https://github.com/Swir/SwirPhotoClean/releases) · [Report a bug](https://github.com/Swir/SwirPhotoClean/issues) · [Project status](STATUS.md)
+[**Highlights**](#-highlights) · [**Download**](#-quick-start) · [**Safety**](#-privacy--safety) · [**1.0 Gate**](#-10-acceptance-progress) · [**Releases**](#-releases)
 
 </div>
 
----
+<img width="100%" src="https://raw.githubusercontent.com/Swir/Swir/main/assets/power-divider-v4.svg" alt="SWIR electric divider" />
 
-## Why SwirPhotoClean?
+## 📍 Project Status
 
-Photo libraries quickly fill up with copied downloads, exported versions, messenger duplicates, edited images and nearly identical shots. SwirPhotoClean is a **Windows duplicate photo finder**, **duplicate image finder** and **similar photo finder** designed to help you review those files safely before removing anything.
+| Item | Status |
+|---|---|
+| Current public preview | **v0.3.0** — Polish / English |
+| Platform | Windows 10 / 11 |
+| Processing | Local; no photo upload required by the application |
+| Latest public release | [v0.3.0 prerelease](https://github.com/Swir/SwirPhotoClean/releases/tag/v0.3.0) |
+| 1.0 acceptance gate | **6 / 7 = 85.7%** from the authoritative checklist in [`STATUS.md`](STATUS.md) |
+| Remaining 1.0 blocker | Confirm successful move-to-Recycle-Bin **and restore** on Windows while preserving the original |
 
-The application works locally on your PC. It does **not** require an account, subscription or cloud upload.
+<p align="center">
+  <img width="100%" src="assets/readme/progress-card.svg" alt="SWIR PhotoClean 1.0 acceptance progress — 6 of 7 verified, 85.7 percent" />
+</p>
 
-### Highlights
+The percentage above measures only the explicit **1.0 acceptance gate**. It does not claim that every possible future feature is complete or that v0.3.0 is a stable 1.0 release.
+
+## 🚀 Overview
+
+**SWIR PhotoClean** is a Windows duplicate-photo and similar-image finder designed for review-first cleanup. It analyzes images locally, groups exact duplicates and visually similar files, provides side-by-side comparison and moves user-selected files to the Windows Recycle Bin only when the operation can be confirmed safely.
+
+It does **not** automatically select every duplicate for deletion, and similar-image matches always require human review.
+
+## ✨ Highlights
 
 | Feature | What it does |
 |---|---|
-| **Exact duplicate detection** | Uses full-file **SHA-256** comparison to identify identical files. |
-| **Similar image detection** | Uses image hashes, aspect ratio and low-resolution colour comparison to find visually similar photos. |
-| **Side-by-side comparison** | Compare two images with dimensions, file sizes and full paths. |
-| **Multiple folders** | Scan several folders and their subfolders in one session. |
-| **Safe manual cleanup** | Nothing is automatically selected for deletion. You decide what goes to the Windows Recycle Bin. |
-| **Protection against mistakes** | The app prevents selecting every image from the same result group. |
-| **CSV export** | Export scan results for Excel or further review. |
-| **Bilingual interface** | Switch between **English** and **Polski**. |
-| **Local & private** | Images stay on your computer during analysis. |
+| 🔐 Exact duplicate detection | Uses full-file SHA-256 comparison for byte-identical files. |
+| 👁️ Similar-photo detection | Combines lightweight image hashes, aspect ratio and low-resolution colour comparison. |
+| 🖼️ Side-by-side review | Shows two selected images with dimensions, sizes and full paths. |
+| 📁 Multi-folder scans | Scans several folders and their subfolders in one session. |
+| ♻️ Safe cleanup | Nothing is auto-selected; chosen files are rechecked before a Windows Recycle Bin operation. |
+| 🛡️ Group protection | Prevents marking every image from the same result group. |
+| 📄 CSV export | Exports scan results for further review. |
+| 🌐 PL / EN interface | Switches between English and Polish without discarding current scan state. |
+| 🔒 Local-first design | Photo analysis stays on the computer. |
 
----
+## ⚙️ Quick Start
 
-## What can it find?
+### Recommended — Windows preview release
 
-SwirPhotoClean can help detect:
+Download [SWIR PhotoClean v0.3.0](https://github.com/Swir/SwirPhotoClean/releases/tag/v0.3.0):
 
-- exact duplicate photos,
-- copied images stored in different folders,
-- renamed duplicates,
-- visually similar photos,
-- alternate exports of the same image,
-- near-duplicate pictures with small visual differences,
-- repeated downloads,
-- photo collections that may be wasting disk space.
-
-Typical searches this project is useful for include **find duplicate photos Windows 11**, **remove duplicate pictures**, **similar image finder**, **duplicate JPG finder**, **photo deduplication tool**, **offline photo cleaner** and **duplicate image remover for Windows**.
-
-> Similarity results are suggestions for manual review. Two photos marked as similar are not automatically safe to delete.
-
----
-
-## Download
-
-Go to **[GitHub Releases](https://github.com/Swir/SwirPhotoClean/releases)** and download the latest Windows ZIP package.
-
-1. Download the release ZIP.
+1. Download `SwirPhotoClean-0.3.0-Windows.zip`.
 2. Extract the **entire archive**.
-3. Open the extracted folder.
-4. Run `SwirPhotoClean.exe`.
+3. Run `SwirPhotoClean.exe` from the extracted folder.
+4. Keep the complete application folder together; do not move only the EXE.
 
-Do not move only the EXE file out of the application folder — keep the complete extracted package together.
+v0.3.0 is a **prerelease/test-stage build**, not a stable 1.0 release.
 
-### System requirements
-
-- Windows 10 or Windows 11
-- 64-bit system recommended
-- No account required
-- No online photo upload required
-
----
-
-## How to use
-
-1. Click **Add folder** / **Dodaj folder**.
-2. Add one or more folders you want to scan.
-3. Enable similar-photo detection if needed.
-4. Choose a similarity sensitivity level. **Standard** is a good starting point.
-5. Click **Scan photos** / **Skanuj zdjęcia**.
-6. Select a result group from the left panel.
-7. Select up to two images with `Ctrl` to compare them side by side.
-8. Review the image, size, dimensions and path carefully.
-9. Mark individual files with **Mark / unmark for Recycle Bin**.
-10. Click **Move selected to Recycle Bin** and confirm the list.
-
-Files are moved to the normal Windows Recycle Bin when the operating system confirms that the operation is safe. SwirPhotoClean does not empty the Recycle Bin automatically.
-
----
-
-## Exact duplicates vs similar photos
-
-### Exact duplicates
-
-Exact duplicate detection compares the full contents of each file using **SHA-256**. Files must match byte-for-byte to be classified as identical.
-
-This is useful for finding:
-
-- copied files,
-- renamed copies,
-- the same image stored in multiple folders.
-
-### Similar photos
-
-Similar-photo detection uses several lightweight visual signals, including:
-
-- gradient / difference-based image hashes,
-- aspect ratio,
-- low-resolution colour comparison.
-
-This can detect images that look alike even when their files are not identical.
-
-Examples include resized exports, slightly edited versions and similar shots from a photo series.
-
-Because visual similarity is subjective, **all similar-image results require human review**.
-
----
-
-## Privacy & safety
-
-SwirPhotoClean is built around a local-first workflow.
-
-- No user account is required.
-- Photos are processed locally.
-- The application does not automatically choose photos for removal.
-- Selected files are rechecked before the move operation.
-- The app protects against marking every image in a result group.
-- Files are moved to the Windows Recycle Bin instead of being permanently erased.
-- The operation stops when the Recycle Bin action cannot be reliably confirmed.
-
-For important photo libraries, keeping a backup is always recommended before large cleanup operations.
-
----
-
-## Supported image formats
-
-Supported:
-
-- JPG / JPEG
-- PNG
-- WebP
-- BMP
-- single-image TIFF
-- single-image GIF
-
-Currently not supported:
-
-- HEIC
-- RAW camera formats
-- animated images
-- multi-page image files
-
-Images above **40 megapixels** are skipped and reported.
-
----
-
-## Important limitations
-
-- Similar photos can still be completely different photos that only look alike.
-- Large crops, strong colour changes or rotation without usable EXIF information may reduce similarity detection accuracy.
-- Similarity groups are created around a reference image, so not every pair inside one group must be equally similar.
-- Exact and similar-result groups can overlap.
-- Reparse points, junctions and some cloud-placeholder files are skipped.
-- A hardlink to an already-read file is not counted as another independent copy.
-- Network and removable drives may be scanned, but Recycle Bin operations from them are blocked.
-- Do not actively edit or synchronize scanned folders while moving files.
-
-The **“To Recycle Bin”** size is the sum of selected file sizes. It is not guaranteed free space until the Windows Recycle Bin is emptied.
-
----
-
-## Language
-
-The application interface is available in:
-
-- 🇬🇧 English
-- 🇵🇱 Polski
-
-Use the language selector in the top-right corner of the application.
-
-The selected language is stored locally in:
-
-```text
-%LOCALAPPDATA%\SwirPhotoClean\settings.json
-```
-
-Changing the interface language keeps your current scan results, selected folders and marked files.
-
----
-
-## Run from source
-
-Requirements:
-
-- Windows 10/11
-- Python **3.12** from python.org
-- Tcl/Tk enabled in the Python installation
+### From source
 
 ```powershell
 git clone https://github.com/Swir/SwirPhotoClean.git
@@ -214,93 +82,137 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe run.py
 ```
 
----
+Python needs working Tcl/Tk support for the desktop GUI.
 
-## Tests
+## 📋 Requirements / Compatibility
 
-Run the automated test suite with:
+| Area | Current scope |
+|---|---|
+| OS | Windows 10 / 11 |
+| Source runtime | Python 3.12 in the project workflow |
+| Packaged app | PyInstaller onedir portable package |
+| UI languages | English / Polski |
+| Supported image files | JPG/JPEG, PNG, WebP, BMP, single-image TIFF, single-image GIF |
+| Not supported | HEIC, RAW camera formats, animated images, multi-page image files |
+| Safety limit | Images above 40 megapixels are skipped and reported |
+
+Network/removable drives may be scanned, but Recycle Bin operations from them are blocked by the current safety model.
+
+## 🎮 Usage
+
+1. Choose **Add folder / Dodaj folder** and select one or more folders.
+2. Enable similar-photo detection if wanted and choose a sensitivity level.
+3. Start **Scan photos / Skanuj zdjęcia**.
+4. Select a result group.
+5. Use `Ctrl` to choose up to two images for side-by-side comparison.
+6. Review the image, dimensions, file size and path.
+7. Mark only files you actually want moved to the Recycle Bin.
+8. Choose **Move selected to Recycle Bin** and confirm the list.
+
+SWIR PhotoClean never empties the Recycle Bin automatically.
+
+## 🔍 Exact Duplicates vs Similar Photos
+
+### Exact duplicates
+
+Exact detection hashes the entire file with **SHA-256**, so renamed or relocated byte-identical copies can still match.
+
+### Similar photos
+
+Similarity analysis uses multiple lightweight visual signals. It can surface resized exports, slight edits or related shots, but **similar does not mean safe to delete**. Large crops, rotation/EXIF differences, strong colour changes and visually coincidental images can affect results.
+
+## 🔒 Privacy & Safety
+
+- No user account is required.
+- Photos are processed locally.
+- The application does not automatically mark photos for removal.
+- Selected files are revalidated before a move operation.
+- The app blocks selecting every image in a result group.
+- Files are sent to the Windows Recycle Bin rather than permanently erased when Windows confirms the operation.
+- If the Recycle Bin action cannot be reliably confirmed, the operation stops instead of falling back to permanent deletion.
+- Reparse points, junctions and some cloud-placeholder files are skipped.
+- A hardlink to an already-read file is not counted as another independent copy.
+
+Keep backups of important photo libraries before any large cleanup session.
+
+## 🌐 Language
+
+The UI supports **English** and **Polski**. The selected language is stored locally in:
+
+```text
+%LOCALAPPDATA%\SwirPhotoClean\settings.json
+```
+
+Changing language preserves current folders, results, marks and similarity level. Some external-library messages and system-dialog buttons can still follow Windows language settings.
+
+## 🧠 Technology / Project Structure
+
+| Path | Role |
+|---|---|
+| `photoclean/core.py` | Scanning, exact/similar matching and result logic |
+| `photoclean/gui.py` | Tk desktop interface and review workflow |
+| `photoclean/recycle.py` | Windows Recycle Bin safety path |
+| `photoclean/i18n.py` | English / Polish localization |
+| `photoclean/selftest.py` | Packaged application self-test |
+| `tests/` | Core, GUI, i18n, pixel compatibility and Windows Recycle Bin tests |
+| `STATUS.md` | Authoritative pre-1.0 acceptance checklist and evidence |
+| `.github/workflows/windows.yml` | Windows tests, portable build and packaged EXE smoke |
+
+The existing runtime icon is preserved in `assets/SwirPhotoClean.ico` and `assets/SwirPhotoClean.png`.
+
+## 🗺️ 1.0 Acceptance Progress
+
+The authoritative acceptance list is in [`STATUS.md`](STATUS.md). Its current state is **6 verified / 7 total = 85.7%**. The remaining unchecked requirement is a successful Windows Recycle Bin move-and-restore test that preserves the original copy.
+
+`tools/readme_progress.py` parses that exact checklist, calculates the unrounded fraction, generates both SVGs and detects stale files:
+
+```powershell
+python tools/readme_progress.py --check
+```
+
+This keeps the README, SVG geometry and the acceptance checklist tied to one source of truth.
+
+## 🧪 Tests & Windows Build
+
+Run source tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+python tools/readme_progress.py --check
 ```
 
----
+The pull-request workflow uses Python 3.12 on Windows, runs the test suite, builds the PyInstaller onedir package and executes the packaged `SwirPhotoClean.exe --self-test` path before uploading an artifact. Stable/release claims remain separate from CI success.
 
-## Build the Windows EXE
+## 📦 Releases
 
-Install build dependencies:
+Latest public release: **[v0.3.0 prerelease](https://github.com/Swir/SwirPhotoClean/releases/tag/v0.3.0)**, published September 10, 2026. It provides `SwirPhotoClean-0.3.0-Windows.zip` and a SHA-256 sidecar.
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
-```
+[**Browse all releases →**](https://github.com/Swir/SwirPhotoClean/releases)
 
-Build with PyInstaller:
+## ⚠️ Limitations
 
-```powershell
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean --icon assets/SwirPhotoClean.ico --add-data "assets;assets" run.py
-```
+- Similar-image results require manual review.
+- Exact and similar groups can overlap.
+- Similarity grouping is reference-based; not every pair inside a group must be equally similar.
+- HEIC, RAW, animated and multi-page images are outside the current scope.
+- The Recycle Bin restore acceptance check is still incomplete; this is why the 1.0 gate is not complete.
+- The displayed “To Recycle Bin” size is selected-file size, not guaranteed freed disk space until the Recycle Bin is emptied.
+- No `LICENSE` file is present in the repository; this documentation migration does not change licensing terms.
 
-The application will be created in:
+## 🔎 Search Keywords
 
-```text
-dist\SwirPhotoClean\
-```
+`duplicate photo finder Windows` • `duplicate image finder` • `similar photo finder` • `similar image finder Windows` • `photo deduplication tool` • `SHA-256 duplicate finder` • `local photo cleaner` • `offline duplicate photo finder` • `Windows 11 duplicate photos` • `safe Recycle Bin cleanup` • `image similarity checker` • `Python photo deduplication` • `duplicate JPG finder` • `duplicate PNG finder` • `local photo organizer`
 
-Run:
+<img width="100%" src="https://raw.githubusercontent.com/Swir/Swir/main/assets/power-divider-v4.svg" alt="SWIR electric divider" />
 
-```text
-dist\SwirPhotoClean\SwirPhotoClean.exe
-```
+<div align="center">
 
-When copying the built application to another computer, copy the **whole `SwirPhotoClean` folder**, not only the EXE.
+<img src="assets/SwirPhotoClean.png" width="96" alt="SWIR PhotoClean application logo" />
 
-GitHub Actions also tests the project on Windows and builds a ZIP artifact. A CI build artifact is not automatically considered a stable release. See **[STATUS.md](STATUS.md)** for the current verification status.
+### `SCAN • COMPARE • CLEAN SAFELY`
 
----
+⭐ **If this project is useful, consider leaving a star.**
 
-## Search terms / discoverability
+[**← SWIR profile**](https://github.com/Swir) · [**All projects →**](https://github.com/Swir?tab=repositories) · [**Report an issue**](https://github.com/Swir/SwirPhotoClean/issues)
 
-<details>
-<summary>Common keywords related to SwirPhotoClean</summary>
-
-<br>
-
-`duplicate photo finder` · `duplicate image finder` · `duplicate photo remover` · `similar image finder` · `similar photo finder` · `photo duplicate cleaner` · `Windows duplicate photos` · `Windows 11 duplicate photo finder` · `find duplicate pictures` · `remove duplicate photos` · `find similar images` · `photo cleaner Windows` · `offline photo cleaner` · `local duplicate finder` · `image deduplication` · `photo deduplication` · `duplicate JPG finder` · `duplicate PNG finder` · `duplicate image scanner` · `photo organizer` · `disk space cleaner photos` · `Python duplicate image finder` · `SHA-256 duplicate finder` · `perceptual image hash` · `image similarity checker`
-
-</details>
-
----
-
-## Reporting bugs
-
-Found a problem? Open an issue:
-
-**https://github.com/Swir/SwirPhotoClean/issues**
-
-Please include:
-
-- SwirPhotoClean version,
-- Windows version,
-- steps to reproduce the issue,
-- image format involved,
-- relevant error message.
-
-Only attach photos that you are allowed to share publicly.
-
----
-
-## Version
-
-Current README documentation targets **SwirPhotoClean 0.3.0**.
-
-This is still a test-stage release. Similar-image detection should be treated as an aid for manual comparison, not as an automatic deletion decision.
-
----
-
-## Autor / Author
-
-Created by **[Swir](https://github.com/Swir)**.
-
-More projects: **[github.com/Swir](https://github.com/Swir)**
-
-If SwirPhotoClean is useful to you, consider leaving a ⭐ on the repository — it helps other users discover the project.
+</div>
