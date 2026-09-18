@@ -19,6 +19,26 @@ from .session import SessionError, SessionSnapshot, load_session, save_session
 
 SESSION_EXTENSION = ".swirpc"
 THRESHOLDS = (3, 6, 10)
+SESSION_EN = {
+    "Sesja": "Session",
+    "Otwórz sesję…": "Open session…",
+    "Zapisz sesję…": "Save session…",
+    "Otwórz sesję": "Open session",
+    "Zapisz sesję": "Save session",
+    "Sesja SWIR PhotoClean": "SWIR PhotoClean session",
+    "Wszystkie pliki": "All files",
+    "Brak sesji do zapisania": "No session to save",
+    "Najpierw ukończ skanowanie. Niepełnych lub pustych wyników nie zapisujemy jako sesji.": "Finish a scan first. Incomplete or empty results are not saved as sessions.",
+    "Nie zapisano sesji": "Session not saved",
+    "Nie można otworzyć sesji": "Cannot open session",
+    "Zapisano sesję • {v0} zdjęć • {v1} grup • bez zaznaczeń do kosza": "Session saved • {v0} photos • {v1} groups • Recycle Bin selections excluded",
+    "Wczytano sesję • {v0} zdjęć • {v1} grup • zaznaczenia do kosza wyczyszczone": "Session loaded • {v0} photos • {v1} groups • Recycle Bin selections cleared",
+}
+
+
+def session_tr(message, **values):
+    text = SESSION_EN.get(message, message) if i18n.language == "en" else message
+    return text.format(**values) if values else text
 
 
 class PhotoCleanApp(BasePhotoCleanApp):
@@ -32,16 +52,16 @@ class PhotoCleanApp(BasePhotoCleanApp):
         menu = tk.Menu(self.root)
         session_menu = tk.Menu(menu, tearoff=False)
         session_menu.add_command(
-            label=tr('Otwórz sesję…'),
+            label=session_tr('Otwórz sesję…'),
             command=self.load_session_dialog,
             accelerator="Ctrl+O",
         )
         session_menu.add_command(
-            label=tr('Zapisz sesję…'),
+            label=session_tr('Zapisz sesję…'),
             command=self.save_session_dialog,
             accelerator="Ctrl+S",
         )
-        menu.add_cascade(label=tr('Sesja'), menu=session_menu)
+        menu.add_cascade(label=session_tr('Sesja'), menu=session_menu)
         self.root.configure(menu=menu)
         self.session_menu = session_menu
         self.root.bind("<Control-o>", lambda event: self.load_session_dialog())
@@ -67,14 +87,14 @@ class PhotoCleanApp(BasePhotoCleanApp):
             return
         if self.result.cancelled or not self.result.photos:
             messagebox.showinfo(
-                tr('Brak sesji do zapisania'),
-                tr('Najpierw ukończ skanowanie. Niepełnych lub pustych wyników nie zapisujemy jako sesji.'),
+                session_tr('Brak sesji do zapisania'),
+                session_tr('Najpierw ukończ skanowanie. Niepełnych lub pustych wyników nie zapisujemy jako sesji.'),
             )
             return
         target = filedialog.asksaveasfilename(
-            title=tr('Zapisz sesję'),
+            title=session_tr('Zapisz sesję'),
             defaultextension=SESSION_EXTENSION,
-            filetypes=[(tr('Sesja SWIR PhotoClean'), f"*{SESSION_EXTENSION}"), ("JSON", "*.json")],
+            filetypes=[(session_tr('Sesja SWIR PhotoClean'), f"*{SESSION_EXTENSION}"), ("JSON", "*.json")],
         )
         if not target:
             return
@@ -87,10 +107,10 @@ class PhotoCleanApp(BasePhotoCleanApp):
         try:
             save_session(snapshot, target)
         except (OSError, SessionError) as error:
-            messagebox.showerror(tr('Nie zapisano sesji'), str(error))
+            messagebox.showerror(session_tr('Nie zapisano sesji'), str(error))
             return
         self.status.set(
-            tr(
+            session_tr(
                 'Zapisano sesję • {v0} zdjęć • {v1} grup • bez zaznaczeń do kosza',
                 v0=len(self.result.photos),
                 v1=len(self.result.groups),
@@ -102,15 +122,19 @@ class PhotoCleanApp(BasePhotoCleanApp):
         if self.busy:
             return
         source = filedialog.askopenfilename(
-            title=tr('Otwórz sesję'),
-            filetypes=[(tr('Sesja SWIR PhotoClean'), f"*{SESSION_EXTENSION}"), ("JSON", "*.json"), (tr('Wszystkie pliki'), "*.*")],
+            title=session_tr('Otwórz sesję'),
+            filetypes=[
+                (session_tr('Sesja SWIR PhotoClean'), f"*{SESSION_EXTENSION}"),
+                ("JSON", "*.json"),
+                (session_tr('Wszystkie pliki'), "*.*"),
+            ],
         )
         if not source:
             return
         try:
             snapshot = load_session(source)
         except (OSError, SessionError) as error:
-            messagebox.showerror(tr('Nie można otworzyć sesji'), str(error))
+            messagebox.showerror(session_tr('Nie można otworzyć sesji'), str(error))
             return
 
         self.folders.delete(0, "end")
@@ -122,7 +146,7 @@ class PhotoCleanApp(BasePhotoCleanApp):
         self.marked.clear()
         self.render_groups()
         self.status.set(
-            tr(
+            session_tr(
                 'Wczytano sesję • {v0} zdjęć • {v1} grup • zaznaczenia do kosza wyczyszczone',
                 v0=len(self.result.photos),
                 v1=len(self.result.groups),
