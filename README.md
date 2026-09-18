@@ -30,11 +30,11 @@
 | Platform | Windows 10 / 11 |
 | Processing | Local; no photo upload required by the application |
 | Latest public release | [v0.3.0 prerelease](https://github.com/Swir/SwirPhotoClean/releases/tag/v0.3.0) |
-| 1.0 acceptance gate | **6 / 7 = 85.7%** from the authoritative checklist in [`STATUS.md`](STATUS.md) |
+| 1.0 acceptance gate | **7 / 8 = 87.5%** from the authoritative checklist in [`STATUS.md`](STATUS.md) |
 | Remaining 1.0 blocker | Confirm successful move-to-Recycle-Bin **and restore** on Windows while preserving the original |
 
 <p align="center">
-  <img width="100%" src="assets/readme/progress-card.svg" alt="SWIR PhotoClean 1.0 acceptance progress — 6 of 7 verified, 85.7 percent" />
+  <img width="100%" src="assets/readme/progress-card.svg" alt="SWIR PhotoClean 1.0 acceptance progress — 7 of 8 verified, 87.5 percent" />
 </p>
 
 The percentage above measures only the explicit **1.0 acceptance gate**. It does not claim that every possible future feature is complete or that v0.3.0 is a stable 1.0 release.
@@ -162,7 +162,7 @@ The existing runtime icon is preserved in `assets/SwirPhotoClean.ico` and `asset
 
 ## 🗺️ 1.0 Acceptance Progress
 
-The authoritative acceptance list is in [`STATUS.md`](STATUS.md). Its current state is **6 verified / 7 total = 85.7%**. The remaining unchecked requirement is a successful Windows Recycle Bin move-and-restore test that preserves the original copy.
+The authoritative acceptance list is in [`STATUS.md`](STATUS.md). Its current state is **7 verified / 8 total = 87.5%**. The remaining unchecked requirement is a successful Windows Recycle Bin move-and-restore test that preserves the original copy.
 
 `tools/readme_progress.py` parses that exact checklist, calculates the unrounded fraction, generates both SVGs and detects stale files:
 
