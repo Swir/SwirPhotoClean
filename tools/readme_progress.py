@@ -66,7 +66,7 @@ def validate_docs(done: int, total: int, pct_text: str) -> list[str]:
     expected_readme = f"**{done} verified / {total} total = {pct_text}**"
     if expected_readme not in readme:
         errors.append("README numeric acceptance summary disagrees with STATUS.md checklist")
-    expected_status = f"**Postęp bramki 1.0: {done} / {total} = {pct_text.replace('.', ',')}**"
+    expected_status = f"**Postęp bramki 1.0: {done} / {total} = {pct_text.replace('.', ',')}.**"
     if expected_status not in status:
         errors.append("STATUS.md numeric fallback disagrees with its checklist")
     return errors
