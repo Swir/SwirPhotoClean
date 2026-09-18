@@ -1,8 +1,14 @@
+## Rozwój do 1.0 — 2026-09-19
+
+Gałąź `main` zawiera już warstwę profesjonalnego review z **Smart Keep**, **Folder Health**, bezpiecznym **Session Save / Resume** oraz pełnoekranowym porównaniem dwóch zdjęć z synchronicznym zoomem i panoramowaniem. Funkcje te nie zmieniają modelu bezpieczeństwa: nic nie jest automatycznie zaznaczane do usunięcia, a sesje nie zapisują zaznaczeń do Kosza.
+
+Najnowszym publicznym wydaniem pozostaje **v0.3.0 prerelease**. Rozwój do 1.0 jest aktywny, ale stabilne 1.0 nie będzie publikowane przed przejściem całej bramki odbioru. Aktualny wynik bramki pozostaje **7 / 8 = 87,5%**; jedynym niespełnionym kryterium jest realnie potwierdzone przeniesienie wygenerowanej kopii do Kosza Windows i jej przywrócenie przy zachowaniu oryginału.
+
 ## Aktualizacja 0.3.0 — 2026-09-10
 
 Interfejs Polski / English, wybór zapisywany w lokalnych ustawieniach użytkownika. Zmiana zachowuje wyniki, zaznaczenia, foldery i poziom podobieństwa. 29 testów przechodzi, w tym angielski układ przy skalowaniu 150%, trwałość ustawień, uszkodzony plik ustawień, nagłówki CSV i komunikaty. Samokontrola paczki sprawdza także przełączenie i ponowne uruchomienie z zapisanym językiem. Komunikaty zewnętrznych bibliotek i przyciski systemowych dialogów mogą zależeć od systemu. Historyczny raport skanowania pozostaje w języku, w którym wykonano skan.
 
-Użytkownik potwierdził poprawne działanie 0.2.1. Wydanie 0.3.0 pozostaje wydaniem testowym; szczegółowy test przywrócenia z Kosza przed 1.0 nadal wymaga potwierdzenia. Automatyzacja godzinowa jest wyłączona na życzenie użytkownika.
+Użytkownik potwierdził poprawne działanie 0.2.1. Wydanie 0.3.0 pozostaje wydaniem testowym; szczegółowy test przywrócenia z Kosza przed 1.0 nadal wymaga potwierdzenia.
 
 ## Poprawka 0.2.1 — 2026-09-10
 
@@ -10,13 +16,13 @@ Usunięto zależność od Image.get_flattened_data; skanowanie korzysta z bajtó
 
 ## Aktualizacja 0.2.0 — 2026-09-10
 
-Przestrzenny nagłówek, wypukłe przyciski, karty podglądów, powiększenie dwuklikiem. Poprawiono podgląd przezroczystości i blokadę odznaczania podczas operacji. 24 testy przechodzą, w tym powiększenie i stany przycisków. Udane przeniesienie do Kosza i przywrócenie nadal wymaga potwierdzenia w zwykłej sesji Windows. Automatyzacja godzinowa pozostaje wyłączona.
+Przestrzenny nagłówek, wypukłe przyciski, karty podglądów, powiększenie dwuklikiem. Poprawiono podgląd przezroczystości i blokadę odznaczania podczas operacji. 24 testy przechodzą, w tym powiększenie i stany przycisków. Udane przeniesienie do Kosza i przywrócenie nadal wymaga potwierdzenia w zwykłej sesji Windows.
 
-# Status — 2026-09-09
+# Status — aktualizowany do 2026-09-19
 
 ## Etap
 
-0.1.0 — działająca wersja rozwojowa, jeszcze nie zatwierdzone wydanie stabilne.
+Rozwój po publicznym wydaniu **v0.3.0 prerelease** w kierunku stabilnego 1.0. `main` zawiera nowsze funkcje niż ostatnie publiczne wydanie, dlatego numer publicznego release nie jest używany jako wskaźnik gotowości 1.0.
 
 ## Zweryfikowano lokalnie
 
@@ -54,4 +60,4 @@ Lokalny runtime dostarczony z aplikacją wymagał względnych TCL_LIBRARY/TK_LIB
 
 ## Następne kroki
 
-Przed 1.0 potwierdzić przywracanie z Kosza i rozszerzyć testy większych zbiorów. Automatyzacja godzinowa została wyłączona na życzenie użytkownika.
+Przed 1.0 potwierdzić przywracanie z Kosza, kontynuować hardening nowych funkcji review i rozszerzyć testy większych zbiorów oraz dużych fotografii bez osłabiania dotychczasowych zabezpieczeń.
