@@ -17,10 +17,13 @@ def prepare_frozen_tk():
     if tk.is_dir():
         os.environ["TK_LIBRARY"] = os.path.relpath(tk, app_dir)
 
+
 if __name__ == "__main__":
     prepare_frozen_tk()
     if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
         from photoclean.selftest import run
+
         raise SystemExit(run(sys.argv[2]))
-    from photoclean.pro_gui import main
+    from photoclean.burst_gui import main
+
     main()
