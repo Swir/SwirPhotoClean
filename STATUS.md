@@ -34,10 +34,10 @@ Przestrzenny nagłówek, wypukłe przyciski, karty podglądów, powiększenie dw
 ## Warunki odbioru — do zakończenia przed 1.0
 
 <p align="center">
-  <img width="100%" src="assets/readme/progress-mini.svg" alt="SWIR PhotoClean 1.0 acceptance gate — 6 of 7 verified, 85.7 percent" />
+  <img width="100%" src="assets/readme/progress-mini.svg" alt="SWIR PhotoClean 1.0 acceptance gate — 7 of 8 verified, 87.5 percent" />
 </p>
 
-**Postęp bramki 1.0: 6 / 7 = 85,7%.** Wartość wynika wyłącznie z poniższej listy `[x]/[ ]`; generator `tools/readme_progress.py` aktualizuje SVG z tej samej sekcji.
+**Postęp bramki 1.0: 7 / 8 = 87,5%.** Wartość wynika wyłącznie z poniższej listy `[x]/[ ]`; generator `tools/readme_progress.py` aktualizuje SVG z tej samej sekcji.
 
 - [x] Udane 24 testy, kompilacja EXE z własną ikoną, samokontrola gotowej paczki i artefakt ZIP w GitHub Actions (uruchomienie 34398518376).
 - [x] Test uruchomienia gotowego EXE z własnym Tcl/Tk i dwoma podglądami obrazów. Pierwsza paczka ujawniła błąd wyszukiwania Tcl; poprawiona paczka przeszła samokontrolę.
