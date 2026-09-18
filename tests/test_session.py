@@ -84,7 +84,7 @@ class SessionTests(unittest.TestCase):
         for field, value in (
             ("digest", "not-a-digest"),
             ("color", "00"),
-            ("width", 100_000),
+            ("width", 200_000),
         ):
             raw = json.loads(json.dumps(base))
             raw["photos"][0][field] = value
