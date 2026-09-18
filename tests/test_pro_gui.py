@@ -165,6 +165,45 @@ class ProGuiTests(unittest.TestCase):
             root.after_cancel(app.poll_id)
             root.destroy()
 
+    def test_two_selected_photos_route_to_fullscreen_compare(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = PhotoCleanApp(root, self.settings_path)
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                first = Path(folder) / "a.png"
+                fixture(first)
+                shutil.copy2(first, Path(folder) / "b.png")
+                app.result = scan([folder])
+                app.render_groups()
+                self.assertEqual(len(app.files.selection()), 2)
+
+                with patch("photoclean.pro_gui.FullscreenCompare") as compare:
+                    app.open_preview(0)
+                compare.assert_called_once()
+                args = compare.call_args.args
+                self.assertIs(args[0], root)
+                self.assertEqual(len(args[1]), 2)
+                self.assertIs(app.compare_view, compare.return_value)
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
+    def test_fullscreen_compare_requires_two_selected_photos(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = PhotoCleanApp(root, self.settings_path)
+        try:
+            with patch("photoclean.pro_gui.messagebox.showinfo") as info, patch(
+                "photoclean.pro_gui.FullscreenCompare"
+            ) as compare:
+                app.open_fullscreen_compare()
+            info.assert_called_once()
+            compare.assert_not_called()
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()
