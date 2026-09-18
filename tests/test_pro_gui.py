@@ -3,11 +3,12 @@ import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw
 
 from photoclean import i18n
-from photoclean.core import scan
+from photoclean.core import ScanResult, scan
 from photoclean.pro_gui import PhotoCleanApp
 
 
@@ -102,6 +103,64 @@ class ProGuiTests(unittest.TestCase):
                 self.assertIn("Smart Keep", app.status.get())
                 self.assertIn("byte-identical", app.status.get())
                 self.assertEqual(len(app.marked), 1)
+                menu = root.nametowidget(root["menu"])
+                self.assertEqual(menu.entrycget(menu.index("end"), "label"), "Session")
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
+    def test_session_save_resume_restores_review_without_recycle_marks(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = PhotoCleanApp(root, self.settings_path)
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                first = Path(folder) / "a.png"
+                fixture(first)
+                shutil.copy2(first, Path(folder) / "b.png")
+                app.folders.insert("end", folder)
+                app.result = scan([folder])
+                app.render_groups()
+                app.files.selection_set("0")
+                app.toggle_mark()
+                self.assertEqual(len(app.marked), 1)
+
+                session_path = Path(folder) / "review.swirpc"
+                with patch("photoclean.pro_gui.filedialog.asksaveasfilename", return_value=str(session_path)):
+                    app.save_session_dialog()
+                self.assertTrue(session_path.is_file())
+                self.assertIn("Zapisano sesję", app.status.get())
+
+                app.result = ScanResult()
+                app.marked = {first}
+                app.folders.delete(0, "end")
+                app.render_groups()
+                with patch("photoclean.pro_gui.filedialog.askopenfilename", return_value=str(session_path)):
+                    app.load_session_dialog()
+                root.update_idletasks()
+
+                self.assertEqual(len(app.result.photos), 2)
+                self.assertEqual(len(app.result.groups), 1)
+                self.assertEqual(app.folders.get(0), folder)
+                self.assertTrue(app.similarity.get())
+                self.assertFalse(app.marked)
+                self.assertEqual(str(app.trash_button["state"]), "disabled")
+                self.assertIn("Wczytano sesję", app.status.get())
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
+    def test_session_dialog_rejects_empty_results_before_file_picker(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = PhotoCleanApp(root, self.settings_path)
+        try:
+            with patch("photoclean.pro_gui.messagebox.showinfo") as info, patch(
+                "photoclean.pro_gui.filedialog.asksaveasfilename"
+            ) as picker:
+                app.save_session_dialog()
+            info.assert_called_once()
+            picker.assert_not_called()
         finally:
             root.after_cancel(app.poll_id)
             root.destroy()
