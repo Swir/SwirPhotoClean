@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .gui import PhotoCleanApp
+from .pro_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -29,6 +29,8 @@ def run(destination):
             root.update()
             assert len(app.images) == 2
             assert not app.marked
+            assert 'Smart Keep' in app.status.get()
+            assert 'Pewne duplikaty' in app.summary.get()
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
@@ -37,6 +39,7 @@ def run(destination):
             root.update_idletasks()
             assert app.scan_button['text'] == 'Scan photos'
             assert len(app.marked) == 1
+            assert 'Exact duplicates' in app.summary.get()
             root.after_cancel(app.poll_id)
             root.destroy()
             root = tk.Tk()
@@ -44,7 +47,16 @@ def run(destination):
             app = PhotoCleanApp(root, Path(folder) / 'settings.json')
             assert app.language_var.get() == 'English'
             root.after_cancel(app.poll_id)
-            report = {"ok": True, "exact_groups": 1, "previews": 2, "languages": ["pl", "en"], "language_persistence": True, "recycle_executed": False}
+            report = {
+                "ok": True,
+                "exact_groups": 1,
+                "previews": 2,
+                "languages": ["pl", "en"],
+                "language_persistence": True,
+                "smart_keep_visible": True,
+                "folder_health_visible": True,
+                "recycle_executed": False,
+            }
     except Exception as error:
         report["error"] = repr(error)
     finally:
