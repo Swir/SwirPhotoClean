@@ -22,5 +22,5 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
         from photoclean.selftest import run
         raise SystemExit(run(sys.argv[2]))
-    from photoclean.gui import main
+    from photoclean.pro_gui import main
     main()
