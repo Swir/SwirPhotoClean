@@ -1,4 +1,4 @@
-"""Packaged smoke extension for performance-profile wiring and persistence."""
+"""Packaged smoke extension for final UI wiring and performance-profile persistence."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .performance_gui import PhotoCleanApp
+from .review_power_gui import PhotoCleanApp
 from .selftest import run as run_base
 
 
@@ -43,6 +43,16 @@ def run(destination):
             root.withdraw()
             app = PhotoCleanApp(root, settings)
             assert app.performance_profile.get() == "balanced"
+            assert hasattr(app, "review_filter_entry")
+            assert hasattr(app, "review_sort_box")
+            assert app.review_sort_mode == "recommended"
+            assert root.bind("<Control-f>")
+            app.result = eco
+            app.render_groups()
+            app.review_filter_var.set("b.png")
+            app._apply_review_view()
+            assert len(app.files.get_children()) == 1
+            assert not app.marked
             app.performance_profile.set("fast")
             app._performance_changed()
             root.update_idletasks()
@@ -56,6 +66,7 @@ def run(destination):
             app = PhotoCleanApp(root, settings)
             assert app.performance_profile.get() == "fast"
             assert hasattr(app, "performance_menu")
+            assert hasattr(app, "review_filter_entry")
             root.after_cancel(app.poll_id)
             root.destroy()
             root = None
@@ -64,6 +75,9 @@ def run(destination):
             performance_profiles_available=True,
             performance_profile_persistence=True,
             performance_profiles_equivalent=True,
+            review_filter_available=True,
+            keyboard_power_mode_available=True,
+            review_filter_non_destructive=True,
         )
     except Exception as error:
         report["ok"] = False
