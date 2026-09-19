@@ -1,0 +1,290 @@
+"""Review ergonomics and keyboard-first workflow for the final desktop layer."""
+from __future__ import annotations
+
+import os
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+from . import i18n
+from .gui import human_size
+from .i18n import tr
+from .insights import recommend_keeper
+from .performance_gui import PhotoCleanApp as PerformancePhotoCleanApp
+from .review_power import filter_sort_photo_indices, move_selection
+
+
+REVIEW_EN = {
+    "Filtr:": "Filter:",
+    "Sortuj:": "Sort:",
+    "Smart Keep najpierw": "Smart Keep first",
+    "Kolejność skanu": "Scan order",
+    "Nazwa A→Z": "Name A→Z",
+    "Największy plik": "Largest file",
+    "Największa rozdzielczość": "Highest resolution",
+    "Widoczne {v0}/{v1}": "Visible {v0}/{v1}",
+    "Tryb klawiaturowy…": "Keyboard Power Mode…",
+    "Tryb klawiaturowy": "Keyboard Power Mode",
+    "Ctrl+F": "Ctrl+F",
+    "Skróty przyspieszają review, ale nie mają skrótu do przenoszenia plików do Kosza. Operacja Kosza nadal wymaga jawnego przycisku i potwierdzenia.": (
+        "Shortcuts speed up review, but there is deliberately no shortcut for moving files to the Recycle Bin. "
+        "Cleanup still requires the explicit button and confirmation."
+    ),
+    "Ctrl+F — filtr bieżącej grupy\nCtrl+↑ / Ctrl+↓ — poprzednia / następna grupa\nAlt+↑ / Alt+↓ — poprzedni / następny widoczny plik\nCtrl+M — zaznacz / odznacz wybrane do Kosza\nCtrl+Shift+M — wyczyść wszystkie zaznaczenia\nCtrl+C — kopiuj ścieżki (gdy aktywna jest lista plików)\nF11 — pełnoekranowe porównanie dwóch wybranych zdjęć\nF1 — ta pomoc": (
+        "Ctrl+F — filter the current group\n"
+        "Ctrl+↑ / Ctrl+↓ — previous / next group\n"
+        "Alt+↑ / Alt+↓ — previous / next visible file\n"
+        "Ctrl+M — mark / unmark selected files for Recycle Bin\n"
+        "Ctrl+Shift+M — clear all marks\n"
+        "Ctrl+C — copy paths (when the file list is focused)\n"
+        "F11 — fullscreen compare for two selected photos\n"
+        "F1 — this help"
+    ),
+}
+
+
+def review_tr(message, **values):
+    text = REVIEW_EN.get(message, message) if i18n.language == "en" else message
+    return text.format(**values) if values else text
+
+
+class PhotoCleanApp(PerformancePhotoCleanApp):
+    """Final app layer with deterministic review filter/sort and safe shortcuts."""
+
+    SORT_LABEL_KEYS = (
+        ("recommended", "Smart Keep najpierw"),
+        ("original", "Kolejność skanu"),
+        ("name", "Nazwa A→Z"),
+        ("size_desc", "Największy plik"),
+        ("resolution_desc", "Największa rozdzielczość"),
+    )
+
+    def __init__(self, root, settings_path=None):
+        self.review_filter_var = tk.StringVar(master=root, value="")
+        self.review_sort_mode = "recommended"
+        self.review_sort_label = tk.StringVar(master=root)
+        self.review_visible_var = tk.StringVar(master=root)
+        self.review_sort_labels = {}
+        super().__init__(root, settings_path)
+
+    def _build(self, root):
+        super()._build(root)
+        self._install_review_controls()
+
+    def _install_review_controls(self):
+        actions = self.mark_button.master
+        self.review_sort_labels = {
+            review_tr(label): mode for mode, label in self.SORT_LABEL_KEYS
+        }
+        current_label = next(
+            (
+                label
+                for label, mode in self.review_sort_labels.items()
+                if mode == self.review_sort_mode
+            ),
+            review_tr("Smart Keep najpierw"),
+        )
+        self.review_sort_label.set(current_label)
+        self.review_visible_var.set(review_tr("Widoczne {v0}/{v1}", v0=0, v1=0))
+
+        self.review_visible_label = ttk.Label(
+            actions, textvariable=self.review_visible_var, style="Muted.TLabel"
+        )
+        self.review_visible_label.pack(side="right", padx=(8, 0))
+
+        self.review_sort_box = ttk.Combobox(
+            actions,
+            textvariable=self.review_sort_label,
+            values=tuple(self.review_sort_labels),
+            state="readonly",
+            width=21,
+        )
+        self.review_sort_box.pack(side="right", padx=(4, 0))
+        self.review_sort_box.bind("<<ComboboxSelected>>", self._review_sort_changed)
+        ttk.Label(actions, text=review_tr("Sortuj:"), style="Muted.TLabel").pack(
+            side="right", padx=(8, 0)
+        )
+
+        self.review_filter_entry = ttk.Entry(
+            actions, textvariable=self.review_filter_var, width=22
+        )
+        self.review_filter_entry.pack(side="right", padx=(4, 0))
+        self.review_filter_entry.bind(
+            "<KeyRelease>", lambda event: self._apply_review_view()
+        )
+        self.review_filter_entry.bind("<Escape>", self._clear_review_filter)
+        ttk.Label(actions, text=review_tr("Filtr:"), style="Muted.TLabel").pack(
+            side="right", padx=(12, 0)
+        )
+
+    def _install_session_menu(self):
+        super()._install_session_menu()
+        self.view_menu.add_separator()
+        self.view_menu.add_command(
+            label=review_tr("Tryb klawiaturowy…"),
+            command=self.show_keyboard_help,
+            accelerator="F1",
+        )
+        self.root.bind("<Control-f>", self._focus_review_filter)
+        self.root.bind("<Control-F>", self._focus_review_filter)
+        self.root.bind("<Control-Up>", lambda event: self._move_group(-1))
+        self.root.bind("<Control-Down>", lambda event: self._move_group(1))
+        self.root.bind("<Alt-Up>", lambda event: self._move_file(-1))
+        self.root.bind("<Alt-Down>", lambda event: self._move_file(1))
+        self.root.bind("<Control-m>", self._toggle_mark_shortcut)
+        self.root.bind("<Control-M>", self._toggle_mark_shortcut)
+        self.root.bind("<Control-Shift-M>", self._clear_marks_shortcut)
+        self.root.bind("<F1>", lambda event: self.show_keyboard_help())
+        self.files.bind("<Control-c>", self._copy_shortcut)
+        self.files.bind("<Control-C>", self._copy_shortcut)
+
+    def _review_sort_changed(self, event=None):
+        self.review_sort_mode = self.review_sort_labels.get(
+            self.review_sort_label.get(), "recommended"
+        )
+        self._apply_review_view()
+
+    def _focus_review_filter(self, event=None):
+        self.review_filter_entry.focus_set()
+        self.review_filter_entry.selection_range(0, "end")
+        return "break"
+
+    def _clear_review_filter(self, event=None):
+        if self.review_filter_var.get():
+            self.review_filter_var.set("")
+            self._apply_review_view()
+        self.files.focus_set()
+        return "break"
+
+    def _recommended_path(self):
+        if not self.active_group:
+            return None
+        recommendation = recommend_keeper(self.active_group)
+        return None if recommendation.equivalent_exact else recommendation.photo.path
+
+    def _apply_review_view(self):
+        if not self.active_group:
+            self.review_visible_var.set(review_tr("Widoczne {v0}/{v1}", v0=0, v1=0))
+            return
+
+        previous = tuple(self.files.selection())
+        indices = filter_sort_photo_indices(
+            self.active_group.photos,
+            self.review_filter_var.get(),
+            self.review_sort_mode,
+            self._recommended_path(),
+        )
+        keeper = self._recommended_path()
+
+        self.files.delete(*self.files.get_children())
+        for index in indices:
+            photo = self.active_group.photos[index]
+            name = photo.path.name
+            if keeper is not None and photo.path == keeper:
+                name = "★ " + name
+            self.files.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    tr("TAK") if photo.path in self.marked else "—",
+                    name,
+                    f"{photo.width} × {photo.height}",
+                    human_size(photo.size),
+                ),
+            )
+
+        visible = {str(index) for index in indices}
+        restored = tuple(item for item in previous if item in visible)
+        if restored:
+            self.files.selection_set(restored[:2])
+        elif indices:
+            self.files.selection_set(tuple(str(index) for index in indices[:2]))
+        self.review_visible_var.set(
+            review_tr(
+                "Widoczne {v0}/{v1}",
+                v0=len(indices),
+                v1=len(self.active_group.photos),
+            )
+        )
+        self.preview()
+
+    def choose_group(self, event=None):
+        super().choose_group(event)
+        self._apply_review_view()
+
+    def render_groups(self):
+        super().render_groups()
+        if not self.result.groups:
+            self.review_visible_var.set(review_tr("Widoczne {v0}/{v1}", v0=0, v1=0))
+
+    def _move_group(self, direction):
+        if self.busy:
+            return "break"
+        children = self.groups.get_children()
+        selection = self.groups.selection()
+        target = move_selection(children, selection[0] if selection else None, direction)
+        if target is None:
+            return "break"
+        self.groups.selection_set(target)
+        self.groups.focus(target)
+        self.groups.see(target)
+        self.choose_group()
+        self.groups.focus_set()
+        return "break"
+
+    def _move_file(self, direction):
+        if self.busy:
+            return "break"
+        children = self.files.get_children()
+        selection = self.files.selection()
+        current = selection[-1] if selection else None
+        target = move_selection(children, current, direction)
+        if target is None:
+            return "break"
+        self.files.selection_set(target)
+        self.files.focus(target)
+        self.files.see(target)
+        self.preview()
+        self.files.focus_set()
+        return "break"
+
+    def _toggle_mark_shortcut(self, event=None):
+        if self.root.focus_get() is self.review_filter_entry:
+            return None
+        self.toggle_mark()
+        return "break"
+
+    def _clear_marks_shortcut(self, event=None):
+        if self.root.focus_get() is self.review_filter_entry:
+            return None
+        self.clear_marks()
+        return "break"
+
+    def _copy_shortcut(self, event=None):
+        self.copy_selected_paths()
+        return "break"
+
+    def show_keyboard_help(self):
+        messagebox.showinfo(
+            review_tr("Tryb klawiaturowy"),
+            review_tr(
+                "Skróty przyspieszają review, ale nie mają skrótu do przenoszenia plików do Kosza. Operacja Kosza nadal wymaga jawnego przycisku i potwierdzenia."
+            )
+            + "\n\n"
+            + review_tr(
+                "Ctrl+F — filtr bieżącej grupy\nCtrl+↑ / Ctrl+↓ — poprzednia / następna grupa\nAlt+↑ / Alt+↓ — poprzedni / następny widoczny plik\nCtrl+M — zaznacz / odznacz wybrane do Kosza\nCtrl+Shift+M — wyczyść wszystkie zaznaczenia\nCtrl+C — kopiuj ścieżki (gdy aktywna jest lista plików)\nF11 — pełnoekranowe porównanie dwóch wybranych zdjęć\nF1 — ta pomoc"
+            ),
+        )
+
+
+def main():
+    if os.name == "nt":
+        import ctypes
+
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except (AttributeError, OSError):
+            pass
+    root = tk.Tk()
+    PhotoCleanApp(root)
+    root.mainloop()
