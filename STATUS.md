@@ -61,3 +61,14 @@ Lokalny runtime dostarczony z aplikacją wymagał względnych TCL_LIBRARY/TK_LIB
 ## Następne kroki
 
 Przed 1.0 potwierdzić przywracanie z Kosza, kontynuować hardening nowych funkcji review i rozszerzyć testy większych zbiorów oraz dużych fotografii bez osłabiania dotychczasowych zabezpieczeń.
+
+## Development cadence — 2026-09-19
+
+The hourly automation must follow the current user-approved publication policy in `Swir/Swir/SWIR-DEVELOPMENT-CADENCE.md`, row `Swir/SwirPhotoClean`.
+
+- Work and verify progress every hour.
+- Do not merge to `main` merely because an hour elapsed.
+- Preferred default-branch integration cadence is about **2–3 hours**, or earlier for a complete green milestone / verified urgent hotfix.
+- Use an existing feature/development branch + PR for cross-run checkpoints when needed.
+- Merge only a coherent package with the required exact-head Windows CI green; if not ready, keep accumulating/fixing rather than forcing a main commit.
+- This cadence policy changes publication timing only; the Recycle Bin safety gate, 1.0 acceptance criteria, tests and release rules remain unchanged.
