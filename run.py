@@ -24,6 +24,6 @@ if __name__ == "__main__":
         from photoclean.selftest_performance import run
 
         raise SystemExit(run(sys.argv[2]))
-    from photoclean.fullscreen_plus_gui import main
+    from photoclean.compare_insights_gui import main
 
     main()
