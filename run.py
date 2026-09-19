@@ -24,6 +24,6 @@ if __name__ == "__main__":
         from photoclean.selftest import run
 
         raise SystemExit(run(sys.argv[2]))
-    from photoclean.bad_shots_gui import main
+    from photoclean.space_hunter_gui import main
 
     main()
