@@ -24,7 +24,6 @@ REVIEW_EN = {
     "Widoczne {v0}/{v1}": "Visible {v0}/{v1}",
     "Tryb klawiaturowy…": "Keyboard Power Mode…",
     "Tryb klawiaturowy": "Keyboard Power Mode",
-    "Ctrl+F": "Ctrl+F",
     "Skróty przyspieszają review, ale nie mają skrótu do przenoszenia plików do Kosza. Operacja Kosza nadal wymaga jawnego przycisku i potwierdzenia.": (
         "Shortcuts speed up review, but there is deliberately no shortcut for moving files to the Recycle Bin. "
         "Cleanup still requires the explicit button and confirmation."
@@ -71,7 +70,13 @@ class PhotoCleanApp(PerformancePhotoCleanApp):
         self._install_review_controls()
 
     def _install_review_controls(self):
+        # Keep review controls on their own row. The primary mark/copy actions
+        # remain usable at the supported 900 px minimum window width and HiDPI.
         actions = self.mark_button.master
+        review_row = ttk.Frame(actions.master, padding=(12, 0, 0, 4))
+        review_row.pack(fill="x", before=self.preview_frame)
+        self.review_controls = review_row
+
         self.review_sort_labels = {
             review_tr(label): mode for mode, label in self.SORT_LABEL_KEYS
         }
@@ -86,35 +91,34 @@ class PhotoCleanApp(PerformancePhotoCleanApp):
         self.review_sort_label.set(current_label)
         self.review_visible_var.set(review_tr("Widoczne {v0}/{v1}", v0=0, v1=0))
 
-        self.review_visible_label = ttk.Label(
-            actions, textvariable=self.review_visible_var, style="Muted.TLabel"
+        ttk.Label(review_row, text=review_tr("Filtr:"), style="Muted.TLabel").pack(
+            side="left"
         )
-        self.review_visible_label.pack(side="right", padx=(8, 0))
+        self.review_filter_entry = ttk.Entry(
+            review_row, textvariable=self.review_filter_var, width=22
+        )
+        self.review_filter_entry.pack(side="left", fill="x", expand=True, padx=(4, 12))
+        self.review_filter_entry.bind(
+            "<KeyRelease>", lambda event: self._apply_review_view()
+        )
+        self.review_filter_entry.bind("<Escape>", self._clear_review_filter)
 
+        ttk.Label(review_row, text=review_tr("Sortuj:"), style="Muted.TLabel").pack(
+            side="left"
+        )
         self.review_sort_box = ttk.Combobox(
-            actions,
+            review_row,
             textvariable=self.review_sort_label,
             values=tuple(self.review_sort_labels),
             state="readonly",
             width=21,
         )
-        self.review_sort_box.pack(side="right", padx=(4, 0))
+        self.review_sort_box.pack(side="left", padx=(4, 12))
         self.review_sort_box.bind("<<ComboboxSelected>>", self._review_sort_changed)
-        ttk.Label(actions, text=review_tr("Sortuj:"), style="Muted.TLabel").pack(
-            side="right", padx=(8, 0)
+        self.review_visible_label = ttk.Label(
+            review_row, textvariable=self.review_visible_var, style="Muted.TLabel"
         )
-
-        self.review_filter_entry = ttk.Entry(
-            actions, textvariable=self.review_filter_var, width=22
-        )
-        self.review_filter_entry.pack(side="right", padx=(4, 0))
-        self.review_filter_entry.bind(
-            "<KeyRelease>", lambda event: self._apply_review_view()
-        )
-        self.review_filter_entry.bind("<Escape>", self._clear_review_filter)
-        ttk.Label(actions, text=review_tr("Filtr:"), style="Muted.TLabel").pack(
-            side="right", padx=(12, 0)
-        )
+        self.review_visible_label.pack(side="right")
 
     def _install_session_menu(self):
         super()._install_session_menu()
@@ -131,7 +135,6 @@ class PhotoCleanApp(PerformancePhotoCleanApp):
         self.root.bind("<Alt-Up>", lambda event: self._move_file(-1))
         self.root.bind("<Alt-Down>", lambda event: self._move_file(1))
         self.root.bind("<Control-m>", self._toggle_mark_shortcut)
-        self.root.bind("<Control-M>", self._toggle_mark_shortcut)
         self.root.bind("<Control-Shift-M>", self._clear_marks_shortcut)
         self.root.bind("<F1>", lambda event: self.show_keyboard_help())
         self.files.bind("<Control-c>", self._copy_shortcut)
