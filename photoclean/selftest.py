@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .pro_gui import PhotoCleanApp
+from .bad_shots_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -31,6 +31,7 @@ def run(destination):
             assert not app.marked
             assert 'Smart Keep' in app.status.get()
             assert 'Pewne duplikaty' in app.summary.get()
+            assert hasattr(app, 'open_bad_shot_finder')
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
@@ -46,6 +47,7 @@ def run(destination):
             root.withdraw()
             app = PhotoCleanApp(root, Path(folder) / 'settings.json')
             assert app.language_var.get() == 'English'
+            assert hasattr(app, 'open_bad_shot_finder')
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -55,6 +57,7 @@ def run(destination):
                 "language_persistence": True,
                 "smart_keep_visible": True,
                 "folder_health_visible": True,
+                "bad_shot_finder_available": True,
                 "recycle_executed": False,
             }
     except Exception as error:
