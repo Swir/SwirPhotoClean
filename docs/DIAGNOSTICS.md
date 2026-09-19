@@ -19,16 +19,30 @@ The helper exists to make the remaining 1.0 acceptance check easy to perform wit
 
 1. Open **View → Diagnostics Center…**.
 2. Choose **Prepare test files…** and select a normal folder on a local fixed drive.
-3. SWIR PhotoClean creates a new `SwirPhotoClean-Recycle-Check-*` folder containing two byte-identical generated PNG files:
+3. SWIR PhotoClean creates a new `SwirPhotoClean-Recycle-Check-*` folder containing two byte-identical, physically distinct generated PNG files:
    - `KEEP-ME.png`
    - `RECYCLE-ME.png`
 4. Choose **Move generated copy to Recycle Bin** and confirm the explicit prompt.
 5. The program routes only `RECYCLE-ME.png` through the same guarded recycle-only implementation used by cleanup. `KEEP-ME.png` must remain unchanged.
 6. Restore `RECYCLE-ME.png` manually from the Windows Recycle Bin to the generated test folder.
 7. Choose **Verify restored copy**.
-8. Verification succeeds only if both generated files exist and both still match the original SHA-256 digest.
+8. Verification succeeds only if both generated files exist, are ordinary non-reparse files, are physically distinct, and still match the original byte size and SHA-256 digest.
+9. An evidence report can be exported programmatically with `export_recycle_evidence()` after validating the generated fixture state.
 
-The local `recycle-verification.json` manifest records the generated digest and the stages that were actually observed. It is evidence for review, not an automatic repository-status change.
+## Evidence manifest v2
+
+`recycle-verification.json` now carries more auditable local evidence:
+
+- a random UUID4 session identifier;
+- the generated file byte size and SHA-256 digest;
+- ordered `prepared → recycled → restored-verified` events with UTC timestamps;
+- evidence flags recorded at each successful transition;
+- a deterministic SHA-256 manifest fingerprint that detects accidental or unreviewed edits;
+- basic runtime metadata for the generated verification session.
+
+The manifest fingerprint is an integrity checksum, **not a digital signature or proof against a malicious editor**. The exported report therefore always contains `acceptance_gate_closed: false`. Stable 1.0 still requires the real Windows move, manual restore, and human review of that evidence before the repository checklist changes.
+
+Legacy v1 manifests remain readable. When a valid legacy session advances to another stage, it is upgraded to v2 and marked as a legacy import rather than silently pretending it was created with the newer evidence format.
 
 ## Safety properties
 
@@ -39,10 +53,14 @@ The local `recycle-verification.json` manifest records the generated digest and 
 - A failed recycle attempt must not be treated as a successful acceptance result.
 - Restore verification cannot pass before a successful recycle stage has been recorded.
 - The original generated file must remain present and SHA-256-identical throughout the workflow.
-- The repository 1.0 checklist remains unchanged until the evidence is actually reviewed.
+- Symlink/reparse fixtures are rejected, and a hardlink to `KEEP-ME.png` cannot masquerade as a restored copy.
+- Evidence export refuses inconsistent fixture state and cannot overwrite either generated fixture or its manifest.
+- The repository 1.0 checklist remains unchanged until the actual Windows evidence is reviewed.
 
 ## Troubleshooting
 
 If preflight is blocked, use a folder on a local internal drive and make sure the packaged application has all of its accompanying files. Network and removable drives are intentionally rejected for Recycle Bin cleanup.
 
 If the recycle move fails, keep the generated folder for diagnostics. The application must never fall back to permanent deletion.
+
+If evidence validation reports a fingerprint, stage-order, size, SHA-256, hardlink or reparse mismatch, start a new generated verification session rather than editing the manifest by hand.

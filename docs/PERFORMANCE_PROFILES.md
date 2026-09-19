@@ -22,12 +22,20 @@ The scanner still runs in a background worker. All profiles keep cancellation ch
 
 The selection is stored locally in `performance.json` next to the existing application settings. It is deliberately separate from `settings.json`, so language persistence and performance persistence cannot overwrite each other. Invalid/corrupt values safely fall back to `Balanced`.
 
-## Benchmarking
+## Large-library benchmark
 
-A manual benchmark is available:
+A manual generated-library benchmark is available:
 
 ```powershell
-python tools/benchmark_scan_profiles.py --count 80 --runs 3
+python tools/benchmark_scan_profiles.py --count 250 --runs 2 --json benchmark.json
 ```
 
-It generates temporary fixtures, runs all profiles, reports median time / throughput / peak traced Python memory, and fails if any profile changes the resulting photos or groups. There is intentionally no fixed timing threshold in CI because disk/cache/runner differences would make it unreliable.
+The default fixture uses 250 unique 1600×900 JPEGs plus periodic exact copies. For every profile it reports median scan time, throughput, peak traced Python memory and cooperative cancellation latency. It also fails if Eco/Balanced/Fast produce different photo/group results, if a cancellation request is not observed, or if a cancelled scan exposes actionable groups.
+
+For a heavier manual stress run, increase both library size and pixel count, for example:
+
+```powershell
+python tools/benchmark_scan_profiles.py --count 1000 --runs 1 --width 2400 --height 1600 --cancel-after 50 --json large-library.json
+```
+
+The benchmark never performs cleanup and never calls the Recycle Bin. There is intentionally no fixed timing or memory threshold in CI because storage, cache state, antivirus activity and runner hardware make those values environment-dependent; the JSON output is intended for regression comparison on the same machine.
