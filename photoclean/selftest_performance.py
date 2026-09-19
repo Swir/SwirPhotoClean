@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .review_power_gui import PhotoCleanApp
+from .fullscreen_plus_gui import PhotoCleanApp
 from .selftest import run as run_base
 
 
@@ -46,6 +46,7 @@ def run(destination):
             assert hasattr(app, "review_filter_entry")
             assert hasattr(app, "review_sort_box")
             assert app.review_sort_mode == "recommended"
+            assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.fullscreen_plus_gui"
             assert root.bind("<Control-f>")
             app.result = eco
             app.render_groups()
@@ -67,6 +68,7 @@ def run(destination):
             assert app.performance_profile.get() == "fast"
             assert hasattr(app, "performance_menu")
             assert hasattr(app, "review_filter_entry")
+            assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.fullscreen_plus_gui"
             root.after_cancel(app.poll_id)
             root.destroy()
             root = None
@@ -78,6 +80,7 @@ def run(destination):
             review_filter_available=True,
             keyboard_power_mode_available=True,
             review_filter_non_destructive=True,
+            integrated_fullscreen_difference_available=True,
         )
     except Exception as error:
         report["ok"] = False
