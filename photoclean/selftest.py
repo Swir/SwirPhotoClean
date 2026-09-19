@@ -2,13 +2,14 @@
 import json
 import shutil
 import tempfile
+import time
 import tkinter as tk
 from pathlib import Path
 
 from PIL import Image
 
+from .classification_gui import PhotoCleanApp
 from .core import scan
-from .safe_mode_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -23,19 +24,22 @@ def run(destination):
             assert len(result.groups) == 1
             root = tk.Tk()
             root.withdraw()
-            app = PhotoCleanApp(root, Path(folder) / 'settings.json')
+            app = PhotoCleanApp(root, Path(folder) / "settings.json")
             app.result = result
             app.render_groups()
             root.update()
             assert len(app.images) == 2
             assert not app.marked
-            assert 'Smart Keep' in app.status.get()
-            assert 'Pewne duplikaty' in app.summary.get()
-            assert hasattr(app, 'open_bad_shot_finder')
-            assert hasattr(app, 'open_space_hunter')
-            assert hasattr(app, 'open_diagnostics')
-            assert hasattr(app, 'open_difference_view')
-            assert hasattr(app, 'safe_mode')
+            assert "Smart Keep" in app.status.get()
+            assert "Pewne duplikaty" in app.summary.get()
+            assert hasattr(app, "open_bad_shot_finder")
+            assert hasattr(app, "open_space_hunter")
+            assert hasattr(app, "open_diagnostics")
+            assert hasattr(app, "open_difference_view")
+            assert hasattr(app, "safe_mode")
+            assert hasattr(app, "open_library_explorer")
+            assert hasattr(app, "open_media_inspector")
+
             app.open_space_hunter()
             root.update()
             assert app.space_hunter_view.report.photo_count == 2
@@ -43,46 +47,78 @@ def run(destination):
             assert app.space_hunter_view.report.exact_reclaimable_bytes == image.stat().st_size
             assert not app.marked
             app.space_hunter_view.window.destroy()
+
             app.open_diagnostics()
             root.update()
             assert app.diagnostics_view.snapshot.photo_count == 2
             assert app.diagnostics_view.snapshot.exact_group_count == 1
             assert app.diagnostics_view.snapshot.marked_count == 0
             app.diagnostics_view.window.destroy()
+
             app.open_difference_view()
             root.update()
             assert app.difference_view.preview.report.changed_ratio == 0.0
             assert app.difference_view.preview.report.mean_delta == 0.0
             assert not app.marked
             app.difference_view.window.destroy()
+
+            app.open_library_explorer()
+            deadline = time.monotonic() + 5.0
+            while app.library_explorer_view.report is None and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.01)
+            assert app.library_explorer_view.report is not None
+            assert app.library_explorer_view.report.analyzed_count == 2
+            assert app.library_explorer_view.report.captured_count == 0
+            assert app.library_explorer_view.report.device_count == 0
+            assert not app.marked
+            app.library_explorer_view.close()
+
+            app.open_media_inspector()
+            deadline = time.monotonic() + 5.0
+            while app.media_inspector_view.report is None and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.01)
+            assert app.media_inspector_view.report is not None
+            assert app.media_inspector_view.report.analyzed_count == 2
+            assert app.media_inspector_view.report.count("camera_photo") == 0
+            assert app.media_inspector_view.report.count("screenshot_candidate") == 0
+            assert app.media_inspector_view.report.count("unknown") == 2
+            assert not app.marked
+            app.media_inspector_view.close()
+
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
-            assert str(app.trash_button['state']) == 'normal'
+            assert str(app.trash_button["state"]) == "normal"
             app.safe_mode.set(True)
             app._safe_mode_changed()
             assert len(app.marked) == 1
-            assert str(app.trash_button['state']) == 'disabled'
+            assert str(app.trash_button["state"]) == "disabled"
             app.safe_mode.set(False)
             app._safe_mode_changed()
-            assert str(app.trash_button['state']) == 'normal'
-            app.language_var.set('English')
+            assert str(app.trash_button["state"]) == "normal"
+
+            app.language_var.set("English")
             app.change_language()
             root.update_idletasks()
-            assert app.scan_button['text'] == 'Scan photos'
+            assert app.scan_button["text"] == "Scan photos"
             assert len(app.marked) == 1
-            assert 'Exact duplicates' in app.summary.get()
+            assert "Exact duplicates" in app.summary.get()
             root.after_cancel(app.poll_id)
             root.destroy()
+
             root = tk.Tk()
             root.withdraw()
-            app = PhotoCleanApp(root, Path(folder) / 'settings.json')
-            assert app.language_var.get() == 'English'
-            assert hasattr(app, 'open_bad_shot_finder')
-            assert hasattr(app, 'open_space_hunter')
-            assert hasattr(app, 'open_diagnostics')
-            assert hasattr(app, 'open_difference_view')
-            assert hasattr(app, 'safe_mode')
+            app = PhotoCleanApp(root, Path(folder) / "settings.json")
+            assert app.language_var.get() == "English"
+            assert hasattr(app, "open_bad_shot_finder")
+            assert hasattr(app, "open_space_hunter")
+            assert hasattr(app, "open_diagnostics")
+            assert hasattr(app, "open_difference_view")
+            assert hasattr(app, "safe_mode")
+            assert hasattr(app, "open_library_explorer")
+            assert hasattr(app, "open_media_inspector")
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -103,6 +139,12 @@ def run(destination):
                 "safe_mode_available": True,
                 "safe_mode_blocks_recycle": True,
                 "safe_mode_preserves_marks": True,
+                "library_explorer_available": True,
+                "library_explorer_opened": True,
+                "library_explorer_read_only": True,
+                "media_inspector_available": True,
+                "media_inspector_opened": True,
+                "media_inspector_read_only": True,
                 "recycle_executed": False,
             }
     except Exception as error:
