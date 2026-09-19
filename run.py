@@ -24,6 +24,6 @@ if __name__ == "__main__":
         from photoclean.selftest import run
 
         raise SystemExit(run(sys.argv[2]))
-    from photoclean.difference_gui import main
+    from photoclean.safe_mode_gui import main
 
     main()

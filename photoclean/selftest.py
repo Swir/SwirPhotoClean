@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .difference_gui import PhotoCleanApp
+from .safe_mode_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -35,6 +35,7 @@ def run(destination):
             assert hasattr(app, 'open_space_hunter')
             assert hasattr(app, 'open_diagnostics')
             assert hasattr(app, 'open_difference_view')
+            assert hasattr(app, 'safe_mode')
             app.open_space_hunter()
             root.update()
             assert app.space_hunter_view.report.photo_count == 2
@@ -57,6 +58,14 @@ def run(destination):
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
+            assert str(app.trash_button['state']) == 'normal'
+            app.safe_mode.set(True)
+            app._safe_mode_changed()
+            assert len(app.marked) == 1
+            assert str(app.trash_button['state']) == 'disabled'
+            app.safe_mode.set(False)
+            app._safe_mode_changed()
+            assert str(app.trash_button['state']) == 'normal'
             app.language_var.set('English')
             app.change_language()
             root.update_idletasks()
@@ -73,6 +82,7 @@ def run(destination):
             assert hasattr(app, 'open_space_hunter')
             assert hasattr(app, 'open_diagnostics')
             assert hasattr(app, 'open_difference_view')
+            assert hasattr(app, 'safe_mode')
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -90,6 +100,9 @@ def run(destination):
                 "difference_view_available": True,
                 "difference_view_opened": True,
                 "difference_view_read_only": True,
+                "safe_mode_available": True,
+                "safe_mode_blocks_recycle": True,
+                "safe_mode_preserves_marks": True,
                 "recycle_executed": False,
             }
     except Exception as error:
