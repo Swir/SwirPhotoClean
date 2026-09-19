@@ -43,6 +43,36 @@ class ReviewPowerHelperTests(unittest.TestCase):
             (1,),
         )
 
+    def test_marked_and_unmarked_scopes_are_presentation_only(self):
+        photos = (
+            fake_photo("C:/x/b.jpg", 200, 800, 600),
+            fake_photo("C:/x/a.jpg", 100, 4000, 3000),
+            fake_photo("C:/x/c.jpg", 500, 1200, 900),
+        )
+        marked = {photos[0].path, photos[2].path}
+        self.assertEqual(
+            filter_sort_photo_indices(
+                photos,
+                sort_mode="name",
+                marked_paths=marked,
+                filter_scope="marked",
+            ),
+            (0, 2),
+        )
+        self.assertEqual(
+            filter_sort_photo_indices(
+                photos,
+                query="a.jpg",
+                sort_mode="original",
+                marked_paths=marked,
+                filter_scope="unmarked",
+            ),
+            (1,),
+        )
+        self.assertEqual(marked, {photos[0].path, photos[2].path})
+        with self.assertRaises(ValueError):
+            filter_sort_photo_indices(photos, filter_scope="cleanup-now")
+
     def test_sort_modes_are_deterministic_and_non_mutating(self):
         photos = (
             fake_photo("C:/x/b.jpg", 200, 800, 600),
@@ -80,6 +110,18 @@ class ReviewPowerGuiTests(unittest.TestCase):
         self.settings_dir.cleanup()
         i18n.language = "pl"
 
+    def _app_with_exact_pair(self, root):
+        app = PhotoCleanApp(root, self.settings_path)
+        folder = tempfile.TemporaryDirectory()
+        first = Path(folder.name) / "alpha.png"
+        Image.new("RGB", (320, 240), "#336699").save(first)
+        second = Path(folder.name) / "beta.png"
+        shutil.copy2(first, second)
+        app.result = scan([folder.name])
+        app.render_groups()
+        root.update_idletasks()
+        return app, folder
+
     def test_filter_preserves_marks_and_original_tree_ids(self):
         root = tk.Tk()
         root.withdraw()
@@ -113,12 +155,43 @@ class ReviewPowerGuiTests(unittest.TestCase):
             root.after_cancel(app.poll_id)
             root.destroy()
 
+    def test_mark_scope_refreshes_immediately_when_mark_changes(self):
+        root = tk.Tk()
+        root.withdraw()
+        app, folder = self._app_with_exact_pair(root)
+        try:
+            app.files.selection_set("0")
+            app.toggle_mark()
+            self.assertEqual(len(app.marked), 1)
+
+            app.review_scope = "marked"
+            app._apply_review_view()
+            self.assertEqual(tuple(app.files.get_children()), ("0",))
+            self.assertIn("1/2", app.review_visible_var.get())
+            self.assertIn("1", app.review_visible_var.get())
+
+            app.files.selection_set("0")
+            app.toggle_mark()
+            self.assertEqual(app.marked, set())
+            self.assertEqual(tuple(app.files.get_children()), ())
+
+            app.review_scope = "unmarked"
+            app._apply_review_view()
+            self.assertEqual(tuple(app.files.get_children()), ("0", "1"))
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+            folder.cleanup()
+
     def test_keyboard_power_bindings_exist_without_cleanup_shortcut(self):
         root = tk.Tk()
         root.withdraw()
         app = PhotoCleanApp(root, self.settings_path)
         try:
             self.assertTrue(root.bind("<Control-f>"))
+            self.assertTrue(root.bind("<Control-Key-1>"))
+            self.assertTrue(root.bind("<Control-Key-2>"))
+            self.assertTrue(root.bind("<Control-Key-3>"))
             self.assertTrue(root.bind("<Control-Down>"))
             self.assertTrue(root.bind("<Alt-Down>"))
             self.assertTrue(root.bind("<F1>"))
