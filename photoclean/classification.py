@@ -124,6 +124,8 @@ _CATEGORY_ORDER = {
     "graphic_candidate": 2,
     "unknown": 3,
 }
+_CONFIDENCE_ORDER = {"high": 0, "medium": 1, "low": 2}
+_SORT_MODES = frozenset({"path", "size_desc", "resolution_desc", "confidence"})
 
 
 def _clean_exif_text(value) -> str | None:
@@ -138,6 +140,58 @@ def _clean_exif_text(value) -> str | None:
 def _screen_size(width: int, height: int) -> bool:
     pair = (width, height)
     return pair in _COMMON_SCREEN_SIZES or (height, width) in _COMMON_SCREEN_SIZES
+
+
+def filter_and_sort_media_items(
+    items: Iterable[MediaClassification],
+    *,
+    query: str = "",
+    sort_by: str = "path",
+) -> tuple[MediaClassification, ...]:
+    """Return a deterministic read-only view of classifications.
+
+    Filtering is intentionally local and textual. It matches path/name, format,
+    dimensions, category/confidence and explainable reason identifiers. Sorting
+    never mutates the input sequence or the underlying scan.
+    """
+
+    if sort_by not in _SORT_MODES:
+        raise ValueError(f"unsupported media sort mode: {sort_by}")
+
+    normalized = " ".join(query.casefold().split())
+
+    def searchable(item: MediaClassification) -> str:
+        reason_text = " ".join(reason.replace("_", " ") for reason in item.reasons)
+        return " ".join(
+            (
+                str(item.photo.path).casefold(),
+                (item.image_format or "").casefold(),
+                item.dimensions.casefold(),
+                item.category.replace("_", " ").casefold(),
+                item.confidence.casefold(),
+                reason_text.casefold(),
+            )
+        )
+
+    visible = [item for item in items if not normalized or normalized in searchable(item)]
+
+    def path_key(item: MediaClassification):
+        return str(item.photo.path).casefold()
+
+    if sort_by == "path":
+        key = lambda item: (path_key(item),)
+    elif sort_by == "size_desc":
+        key = lambda item: (-item.photo.size, path_key(item))
+    elif sort_by == "resolution_desc":
+        key = lambda item: (-(item.photo.width * item.photo.height), -item.photo.size, path_key(item))
+    else:
+        key = lambda item: (
+            _CONFIDENCE_ORDER.get(item.confidence, 99),
+            _CATEGORY_ORDER.get(item.category, 99),
+            path_key(item),
+        )
+
+    return tuple(sorted(visible, key=key))
 
 
 def inspect_media_type(photo: Photo) -> MediaClassification:

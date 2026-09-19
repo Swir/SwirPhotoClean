@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from . import i18n
-from .classification import MediaInspectionReport, analyze_media_types
+from .classification import MediaInspectionReport, analyze_media_types, filter_and_sort_media_items
 from .gui import BG, human_size
 from .library_gui import PhotoCleanApp as LibraryPhotoCleanApp
 
@@ -31,9 +31,17 @@ MEDIA_EN = {
     "Format": "Format",
     "Pewność": "Confidence",
     "Powód": "Reason",
+    "Filtruj:": "Filter:",
+    "Sortuj:": "Sort:",
+    "Ścieżka A→Z": "Path A→Z",
+    "Największy plik": "Largest file",
+    "Największa rozdzielczość": "Highest resolution",
+    "Najwyższa pewność": "Highest confidence",
+    "Widoczne: {v0}/{v1}": "Visible: {v0}/{v1}",
     "Kopiuj ścieżki": "Copy paths",
     "Otwórz pasującą grupę": "Open matching group",
     "Wybierz kategorię z listy.": "Select a category from the list.",
+    "Brak plików pasujących do bieżącego filtra.": "No files match the current filter.",
     "Żaden plik z tego widoku nie należy do grupy duplikatów/podobnych zdjęć.": "No file in this view belongs to a duplicate/similar group.",
     "Gotowe • pliki {v0} • aparat {v1} • screenshot kandydaci {v2} • grafiki {v3} • nieokreślone {v4} • niedostępne {v5}": "Finished • files {v0} • camera {v1} • screenshot candidates {v2} • graphics {v3} • unknown {v4} • unavailable {v5}",
     "Analiza anulowana • odczytano {v0} z {v1} • nic nie zmieniono": "Analysis cancelled • read {v0} of {v1} • nothing changed",
@@ -109,6 +117,7 @@ class MediaInspectorWindow:
         self.closed = False
         self.category_nodes: dict[str, tuple] = {}
         self.item_nodes: dict[str, object] = {}
+        self.visible_photos = ()
 
         self.window = tk.Toplevel(app.root)
         self.window.title(media_tr("Analiza typów obrazu"))
@@ -157,6 +166,35 @@ class MediaInspectorWindow:
         self.category_tree.column("category", width=210, minwidth=150, stretch=True)
         self.category_tree.pack(fill="both", expand=True)
 
+        filter_row = ttk.Frame(right)
+        filter_row.pack(fill="x", pady=(0, 7))
+        ttk.Label(filter_row, text=media_tr("Filtruj:")).pack(side="left")
+        self.filter_var = tk.StringVar()
+        self.filter_entry = ttk.Entry(filter_row, textvariable=self.filter_var, width=28)
+        self.filter_entry.pack(side="left", fill="x", expand=True, padx=(6, 10))
+        self.filter_entry.bind("<KeyRelease>", lambda event: self._render_selected_category())
+
+        ttk.Label(filter_row, text=media_tr("Sortuj:")).pack(side="left")
+        self.sort_options = {
+            media_tr("Ścieżka A→Z"): "path",
+            media_tr("Największy plik"): "size_desc",
+            media_tr("Największa rozdzielczość"): "resolution_desc",
+            media_tr("Najwyższa pewność"): "confidence",
+        }
+        first_sort = next(iter(self.sort_options))
+        self.sort_var = tk.StringVar(value=first_sort)
+        self.sort_combo = ttk.Combobox(
+            filter_row,
+            textvariable=self.sort_var,
+            values=tuple(self.sort_options),
+            state="readonly",
+            width=21,
+        )
+        self.sort_combo.pack(side="left", padx=(6, 10))
+        self.sort_combo.bind("<<ComboboxSelected>>", lambda event: self._render_selected_category())
+        self.visible_var = tk.StringVar(value=media_tr("Widoczne: {v0}/{v1}", v0=0, v1=0))
+        ttk.Label(filter_row, textvariable=self.visible_var).pack(side="right")
+
         item_frame = ttk.Frame(right)
         item_frame.pack(fill="both", expand=True)
         self.item_tree = ttk.Treeview(
@@ -203,10 +241,20 @@ class MediaInspectorWindow:
         self.cancel_button.pack(side="right", padx=(8, 0))
         ttk.Button(buttons, text=media_tr("Zamknij"), command=self.close).pack(side="right")
         self.window.bind("<Escape>", lambda event: self.close())
+        self.window.bind("<Control-f>", self._focus_filter)
+        self.window.bind("<Control-F>", self._focus_filter)
 
         self.worker = threading.Thread(target=self._worker, name="SwirPhotoCleanMediaInspector", daemon=True)
         self.worker.start()
         self.poll_id = self.window.after(50, self._poll)
+
+    def _focus_filter(self, event=None):
+        self.filter_entry.focus_set()
+        self.filter_entry.selection_range(0, "end")
+        return "break"
+
+    def _sort_mode(self):
+        return self.sort_options.get(self.sort_var.get(), "path")
 
     def _worker(self):
         try:
@@ -297,9 +345,9 @@ class MediaInspectorWindow:
             self.category_tree.selection_set(preferred)
             self.category_tree.focus(preferred)
             self._render_selected_category()
-            self.copy_button.configure(state="normal")
-            self.open_button.configure(state="normal")
         else:
+            self.visible_photos = ()
+            self.visible_var.set(media_tr("Widoczne: {v0}/{v1}", v0=0, v1=0))
             self.copy_button.configure(state="disabled")
             self.open_button.configure(state="disabled")
 
@@ -312,12 +360,22 @@ class MediaInspectorWindow:
             return
         selected = {photo.path for photo in self._selected_category_photos()}
         self.item_nodes.clear()
+        self.visible_photos = ()
         for row in self.item_tree.get_children():
             self.item_tree.delete(row)
         if not selected:
+            self.visible_var.set(media_tr("Widoczne: {v0}/{v1}", v0=0, v1=0))
+            self.copy_button.configure(state="disabled")
+            self.open_button.configure(state="disabled")
             return
-        visible = [item for item in self.report.items if item.photo.path in selected]
-        visible.sort(key=lambda item: str(item.photo.path).casefold())
+        category_items = tuple(item for item in self.report.items if item.photo.path in selected)
+        visible = filter_and_sort_media_items(
+            category_items,
+            query=self.filter_var.get(),
+            sort_by=self._sort_mode(),
+        )
+        self.visible_photos = tuple(item.photo for item in visible)
+        self.visible_var.set(media_tr("Widoczne: {v0}/{v1}", v0=len(visible), v1=len(category_items)))
         for index, item in enumerate(visible):
             iid = f"item:{index}"
             self.item_nodes[iid] = item
@@ -333,13 +391,21 @@ class MediaInspectorWindow:
                     reasons_text(item.reasons),
                 ),
             )
+        state = "normal" if visible else "disabled"
+        self.copy_button.configure(state=state)
+        self.open_button.configure(state=state)
+
+    def _empty_view_message(self):
+        if self.filter_var.get().strip():
+            return media_tr("Brak plików pasujących do bieżącego filtra.")
+        return media_tr("Wybierz kategorię z listy.")
 
     def copy_paths(self):
-        photos = self._selected_category_photos()
+        photos = self.visible_photos
         if not photos:
             messagebox.showinfo(
                 media_tr("Analiza typów obrazu"),
-                media_tr("Wybierz kategorię z listy."),
+                self._empty_view_message(),
                 parent=self.window,
             )
             return
@@ -354,11 +420,11 @@ class MediaInspectorWindow:
             item = self.item_nodes.get(item_selection[0])
             paths = {item.photo.path} if item is not None else set()
         else:
-            paths = {photo.path for photo in self._selected_category_photos()}
+            paths = {photo.path for photo in self.visible_photos}
         if not paths:
             messagebox.showinfo(
                 media_tr("Analiza typów obrazu"),
-                media_tr("Wybierz kategorię z listy."),
+                self._empty_view_message(),
                 parent=self.window,
             )
             return

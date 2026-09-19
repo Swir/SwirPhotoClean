@@ -13,6 +13,19 @@ The inspector groups scanned files into four deliberately conservative buckets:
 
 Every row shows the dimensions, source format, confidence level and the signals that produced the result.
 
+## Filtering and sorting
+
+The right-hand list can be filtered without re-running analysis. The filter matches the full path/file name, format, dimensions, category, confidence and explainable reason names. `Ctrl+F` focuses the filter box.
+
+Visible rows can be sorted by:
+
+- path A→Z;
+- largest file first;
+- highest resolution first;
+- highest confidence first.
+
+Copy/open actions operate on the **currently visible filtered rows**, so narrowing the list never silently acts on hidden entries. Filtering and sorting only reshape the in-memory review view; they never alter the scan result or Recycle Bin marks.
+
 ## Safety rules
 
 - The feature never changes files, EXIF or scan groups.
@@ -46,6 +59,18 @@ Camera-photo evidence:
 
 1. EXIF `Make` and/or `Model`;
 2. `DateTimeOriginal`, when present, is shown as an additional supporting signal.
+
+## Performance benchmark
+
+`tools/benchmark_review_metadata.py` creates a temporary synthetic library and measures the EXIF Library Explorer and Media Type Inspector independently. It reports median time, files/second and Python peak traced memory. The script intentionally has **no pass/fail time threshold**, because disk, antivirus and filesystem cache differences make absolute CI timing unreliable.
+
+Example:
+
+```powershell
+python tools/benchmark_review_metadata.py --count 500 --repeat 3
+```
+
+Compare benchmark runs only on the same machine/storage when evaluating a regression.
 
 ## Limitations
 

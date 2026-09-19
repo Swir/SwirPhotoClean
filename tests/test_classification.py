@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from photoclean.classification import analyze_media_types, inspect_media_type
+from photoclean.classification import analyze_media_types, filter_and_sort_media_items, inspect_media_type
 from photoclean.core import ScanResult, read_photo
 
 
@@ -110,6 +110,33 @@ class MediaClassificationTests(unittest.TestCase):
             )
             self.assertEqual([photo.path.name for photo in result.photos], ["camera.jpg", "screen.png", "graphic.png", "unknown.jpg"])
             self.assertEqual(result.groups, [])
+
+    def test_filter_and_sort_are_deterministic_and_do_not_mutate_items(self):
+        with tempfile.TemporaryDirectory() as folder:
+            camera = inspect_media_type(
+                self._photo(folder, "Camera.JPG", size=(800, 600), image_format="JPEG", make="Canon")
+            )
+            screenshot = inspect_media_type(self._photo(folder, "screen.png", size=(1920, 1080)))
+            unknown = inspect_media_type(self._photo(folder, "export.jpg", size=(803, 607), image_format="JPEG"))
+            items = (unknown, screenshot, camera)
+
+            filtered = filter_and_sort_media_items(items, query="common screen", sort_by="path")
+            self.assertEqual([item.photo.path.name for item in filtered], ["screen.png"])
+            self.assertEqual(
+                [item.photo.path.name for item in filter_and_sort_media_items(items, query="camera.jpg")],
+                ["Camera.JPG"],
+            )
+            self.assertEqual(
+                [item.photo.path.name for item in filter_and_sort_media_items(items, sort_by="resolution_desc")],
+                ["screen.png", "export.jpg", "Camera.JPG"],
+            )
+            self.assertEqual(
+                [item.confidence for item in filter_and_sort_media_items(items, sort_by="confidence")],
+                ["high", "medium", "low"],
+            )
+            self.assertEqual(items, (unknown, screenshot, camera))
+            with self.assertRaises(ValueError):
+                filter_and_sort_media_items(items, sort_by="not-a-mode")
 
     def test_unavailable_file_is_unknown_and_counted(self):
         with tempfile.TemporaryDirectory() as folder:
