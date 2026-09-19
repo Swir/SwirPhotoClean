@@ -259,7 +259,10 @@ class PhotoCleanApp(BadShotPhotoCleanApp):
                 space_tr("Najpierw wykonaj lub wczytaj zakończony skan."),
             )
             return
-        SpaceHunterWindow(self)
+        existing = getattr(self, "space_hunter_view", None)
+        if existing is not None and existing.window.winfo_exists():
+            existing.window.destroy()
+        self.space_hunter_view = SpaceHunterWindow(self)
 
 
 def main():
