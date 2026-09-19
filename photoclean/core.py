@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from .i18n import tr
+from .performance import PerformanceProfile, get_performance_profile
 
 import csv
 import hashlib
 import os
 import stat
 import threading
+import time
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -71,32 +73,50 @@ def signature(info):
     return info.st_size, info.st_mtime_ns, info.st_dev, info.st_ino
 
 
-def sha256(path: Path, cancel: threading.Event) -> str:
+def sha256(path: Path, cancel: threading.Event, performance_profile: str | PerformanceProfile | None = None) -> str:
+    """Hash a file with profile-specific I/O chunks and cooperative yielding."""
+    profile = get_performance_profile(performance_profile)
     digest = hashlib.sha256()
+    bytes_since_yield = 0
     with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
+        while chunk := stream.read(profile.hash_chunk_bytes):
             checkpoint(cancel)
             digest.update(chunk)
+            if profile.cooperative_yield_bytes:
+                bytes_since_yield += len(chunk)
+                if bytes_since_yield >= profile.cooperative_yield_bytes:
+                    # Yield the worker thread without adding an artificial delay.
+                    time.sleep(0)
+                    bytes_since_yield = 0
+                    checkpoint(cancel)
     return digest.hexdigest()
 
 
-def read_photo(path: Path, cancel: threading.Event) -> Photo:
+def read_photo(path: Path, cancel: threading.Event, performance_profile: str | PerformanceProfile | None = None) -> Photo:
+    profile = get_performance_profile(performance_profile)
     checkpoint(cancel)
     before = path.stat()
-    digest = sha256(path, cancel)
+    digest = sha256(path, cancel, profile)
+    checkpoint(cancel)
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(path) as source:
+            checkpoint(cancel)
             if source.width * source.height > MAX_PIXELS:
                 raise ValueError(tr('obraz przekracza limit 40 megapikseli'))
             if getattr(source, "n_frames", 1) > 1:
                 raise ValueError(tr('obraz animowany lub wielostronicowy — pominięty'))
-            im = ImageOps.exif_transpose(source).convert("RGBA")
+            oriented = ImageOps.exif_transpose(source)
+            checkpoint(cancel)
+            im = oriented.convert("RGBA")
+            checkpoint(cancel)
             background = Image.new("RGBA", im.size, "white")
             background.alpha_composite(im)
+            checkpoint(cancel)
             rgb = background.convert("RGB")
             width, height = rgb.size
             gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
+            checkpoint(cancel)
             bits = 0
             for y in range(8):
                 for x in range(8):
@@ -104,6 +124,7 @@ def read_photo(path: Path, cancel: threading.Event) -> Photo:
             # Low-resolution RGB signature prevents flat, different-color images
             # with identical gradient hashes from becoming false matches.
             color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
+            checkpoint(cancel)
     after = path.stat()
     if signature(before) != signature(after):
         raise ValueError(tr('plik zmienił się podczas skanowania'))
@@ -152,9 +173,10 @@ def similar(a: Photo, b: Photo, threshold: int) -> bool:
     return error <= (14 + threshold * 2) ** 2
 
 
-def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
+def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, performance_profile="balanced"):
     cancel = cancel or threading.Event()
     progress = progress or (lambda message: None)
+    profile = get_performance_profile(performance_profile)
     result = ScanResult()
     seen_paths, seen_inodes = set(), set()
     if not 0 <= threshold <= 16:
@@ -169,15 +191,20 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
                 result.warnings.append(str(error))
             for folder, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
                 checkpoint(cancel)
+                # Sort in place to keep deterministic traversal without allocating a
+                # second potentially huge list for large flat folders.
+                dirs.sort()
                 kept = []
-                for name in sorted(dirs):
+                for name in dirs:
+                    checkpoint(cancel)
                     try:
                         if not linked(Path(folder) / name):
                             kept.append(name)
                     except OSError as error:
                         result.warnings.append(str(error))
                 dirs[:] = kept
-                for name in sorted(files):
+                files.sort()
+                for name in files:
                     checkpoint(cancel)
                     path = Path(folder) / name
                     if path.suffix.lower() not in EXTENSIONS:
@@ -195,14 +222,17 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
                         if info.st_ino and inode in seen_inodes:
                             result.warnings.append(tr('{v0}: drugie dowiązanie do tego samego pliku — pominięte', v0=path))
                             continue
-                        photo = read_photo(path, cancel)
+                        photo = read_photo(path, cancel, profile)
                         seen_inodes.add(inode)
                         result.photos.append(photo)
                         progress(tr('Odczytano {v0} zdjęć • {v1}', v0=len(result.photos), v1=name))
+                    except Cancelled:
+                        raise
                     except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
                         result.warnings.append(f"{path}: {error}")
         exact = defaultdict(list)
         for photo in result.photos:
+            checkpoint(cancel)
             exact[photo.digest].append(photo)
         result.groups = [Group("exact", tuple(items)) for items in exact.values() if len(items) > 1]
         if include_similar:
@@ -222,6 +252,7 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True):
                 else:
                     buckets[anchor.path].append(photo)
             for representatives in buckets.values():
+                checkpoint(cancel)
                 if len(representatives) > 1:
                     result.groups.append(Group("similar", tuple(p for rep in representatives for p in exact[rep.digest])))
         return result

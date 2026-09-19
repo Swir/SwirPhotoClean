@@ -21,9 +21,9 @@ def prepare_frozen_tk():
 if __name__ == "__main__":
     prepare_frozen_tk()
     if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
-        from photoclean.selftest import run
+        from photoclean.selftest_performance import run
 
         raise SystemExit(run(sys.argv[2]))
-    from photoclean.cleanup_history_gui import main
+    from photoclean.performance_gui import main
 
     main()
