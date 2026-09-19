@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .diagnostics_gui import PhotoCleanApp
+from .difference_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -34,6 +34,7 @@ def run(destination):
             assert hasattr(app, 'open_bad_shot_finder')
             assert hasattr(app, 'open_space_hunter')
             assert hasattr(app, 'open_diagnostics')
+            assert hasattr(app, 'open_difference_view')
             app.open_space_hunter()
             root.update()
             assert app.space_hunter_view.report.photo_count == 2
@@ -47,6 +48,12 @@ def run(destination):
             assert app.diagnostics_view.snapshot.exact_group_count == 1
             assert app.diagnostics_view.snapshot.marked_count == 0
             app.diagnostics_view.window.destroy()
+            app.open_difference_view()
+            root.update()
+            assert app.difference_view.preview.report.changed_ratio == 0.0
+            assert app.difference_view.preview.report.mean_delta == 0.0
+            assert not app.marked
+            app.difference_view.window.destroy()
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
@@ -65,6 +72,7 @@ def run(destination):
             assert hasattr(app, 'open_bad_shot_finder')
             assert hasattr(app, 'open_space_hunter')
             assert hasattr(app, 'open_diagnostics')
+            assert hasattr(app, 'open_difference_view')
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -79,6 +87,9 @@ def run(destination):
                 "space_hunter_opened": True,
                 "diagnostics_available": True,
                 "diagnostics_opened": True,
+                "difference_view_available": True,
+                "difference_view_opened": True,
+                "difference_view_read_only": True,
                 "recycle_executed": False,
             }
     except Exception as error:
