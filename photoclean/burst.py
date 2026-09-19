@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import Group, Photo, ScanResult
-from .insights import KeeperRecommendation, recommend_keeper
+from .quality import QualityKeeperRecommendation, recommend_keeper_with_quality
 
 # EXIF tag ids from the TIFF/Exif specification.
 _DATETIME_TAGS = (
@@ -41,7 +41,7 @@ class BurstSequence:
     photos: tuple[Photo, ...]
     started_at: datetime
     ended_at: datetime
-    keeper: KeeperRecommendation
+    keeper: QualityKeeperRecommendation
 
     @property
     def span_seconds(self) -> float:
@@ -110,8 +110,8 @@ def burst_sequences(
     - every included frame must have a parseable EXIF capture timestamp;
     - adjacent captures must be no more than ``max_gap_seconds`` apart.
 
-    Nothing is marked for deletion. ``keeper`` is only the same explainable
-    Smart Keep suggestion used elsewhere in the application.
+    Nothing is marked for deletion. ``keeper`` is an explainable Smart Keep
+    suggestion enhanced with local sharpness/exposure review signals.
     """
 
     if max_gap_seconds < 0:
@@ -152,7 +152,7 @@ def burst_sequences(
                     photos=photos,
                     started_at=sequence[0][0],
                     ended_at=sequence[-1][0],
-                    keeper=recommend_keeper(review_group),
+                    keeper=recommend_keeper_with_quality(review_group),
                 )
             )
 
