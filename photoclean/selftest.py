@@ -2,13 +2,14 @@
 import json
 import shutil
 import tempfile
+import time
 import tkinter as tk
 from pathlib import Path
 
 from PIL import Image
 
 from .core import scan
-from .safe_mode_gui import PhotoCleanApp
+from .library_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -36,6 +37,7 @@ def run(destination):
             assert hasattr(app, 'open_diagnostics')
             assert hasattr(app, 'open_difference_view')
             assert hasattr(app, 'safe_mode')
+            assert hasattr(app, 'open_library_explorer')
             app.open_space_hunter()
             root.update()
             assert app.space_hunter_view.report.photo_count == 2
@@ -55,6 +57,17 @@ def run(destination):
             assert app.difference_view.preview.report.mean_delta == 0.0
             assert not app.marked
             app.difference_view.window.destroy()
+            app.open_library_explorer()
+            deadline = time.monotonic() + 5.0
+            while app.library_explorer_view.report is None and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.01)
+            assert app.library_explorer_view.report is not None
+            assert app.library_explorer_view.report.analyzed_count == 2
+            assert app.library_explorer_view.report.captured_count == 0
+            assert app.library_explorer_view.report.device_count == 0
+            assert not app.marked
+            app.library_explorer_view.close()
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
@@ -83,6 +96,7 @@ def run(destination):
             assert hasattr(app, 'open_diagnostics')
             assert hasattr(app, 'open_difference_view')
             assert hasattr(app, 'safe_mode')
+            assert hasattr(app, 'open_library_explorer')
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -103,6 +117,9 @@ def run(destination):
                 "safe_mode_available": True,
                 "safe_mode_blocks_recycle": True,
                 "safe_mode_preserves_marks": True,
+                "library_explorer_available": True,
+                "library_explorer_opened": True,
+                "library_explorer_read_only": True,
                 "recycle_executed": False,
             }
     except Exception as error:
