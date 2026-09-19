@@ -8,7 +8,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from .classification_gui import PhotoCleanApp
+from .cleanup_history import append_cleanup_record, build_cleanup_plan, finalize_cleanup_record
+from .cleanup_history_gui import PhotoCleanApp
 from .core import scan
 
 
@@ -39,6 +40,7 @@ def run(destination):
             assert hasattr(app, "safe_mode")
             assert hasattr(app, "open_library_explorer")
             assert hasattr(app, "open_media_inspector")
+            assert hasattr(app, "open_cleanup_history")
 
             app.open_space_hunter()
             root.update()
@@ -87,6 +89,31 @@ def run(destination):
             assert not app.marked
             app.media_inspector_view.close()
 
+            dry_target = result.groups[0].photos[0].path
+            dry_plan = build_cleanup_plan(
+                result,
+                [dry_target],
+                started_at="2026-09-19T00:00:00+00:00",
+                record_id="packaged-self-test",
+            )
+            dry_record = finalize_cleanup_record(
+                dry_plan,
+                [],
+                ["packaged self-test: dry run only"],
+                finished_at="2026-09-19T00:00:01+00:00",
+            )
+            append_cleanup_record(app.cleanup_history_path, dry_record)
+            assert dry_target.exists()
+            assert dry_record.completed_count == 0
+            assert dry_record.moved_to_recycle_bytes == 0
+            app.open_cleanup_history()
+            root.update()
+            assert len(app.cleanup_history_view.records) == 1
+            assert app.cleanup_history_view.records[0].record_id == "packaged-self-test"
+            assert app.cleanup_history_view.records[0].completed_count == 0
+            assert not app.marked
+            app.cleanup_history_view.window.destroy()
+
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
@@ -105,6 +132,7 @@ def run(destination):
             assert app.scan_button["text"] == "Scan photos"
             assert len(app.marked) == 1
             assert "Exact duplicates" in app.summary.get()
+            assert hasattr(app, "open_cleanup_history")
             root.after_cancel(app.poll_id)
             root.destroy()
 
@@ -119,6 +147,7 @@ def run(destination):
             assert hasattr(app, "safe_mode")
             assert hasattr(app, "open_library_explorer")
             assert hasattr(app, "open_media_inspector")
+            assert hasattr(app, "open_cleanup_history")
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -145,12 +174,18 @@ def run(destination):
                 "media_inspector_available": True,
                 "media_inspector_opened": True,
                 "media_inspector_read_only": True,
+                "cleanup_history_available": True,
+                "cleanup_history_opened": True,
+                "cleanup_history_dry_run_only": True,
                 "recycle_executed": False,
             }
     except Exception as error:
         report["error"] = repr(error)
     finally:
         if root is not None:
-            root.destroy()
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
         Path(destination).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0 if report["ok"] else 1
