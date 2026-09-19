@@ -6,6 +6,7 @@ from typing import Iterable, Sequence
 
 
 SORT_MODES = ("recommended", "original", "name", "size_desc", "resolution_desc")
+FILTER_SCOPES = ("all", "marked", "unmarked")
 
 
 def _normalized_terms(query: str) -> tuple[str, ...]:
@@ -31,21 +32,38 @@ def filter_sort_photo_indices(
     query: str = "",
     sort_mode: str = "recommended",
     recommended_path=None,
+    marked_paths: Iterable | None = None,
+    filter_scope: str = "all",
 ) -> tuple[int, ...]:
     """Return original photo indices for the current review view.
 
     This helper never mutates the source group. Filtering is AND-based across
     whitespace-separated terms and sorting is deterministic. ``recommended``
     only affects presentation order; it never selects or marks a file.
+
+    ``filter_scope`` is a presentation-only view over the caller's existing
+    cleanup marks. Hiding a row never creates or removes a mark by itself.
     """
     if sort_mode not in SORT_MODES:
         raise ValueError(f"Unsupported review sort mode: {sort_mode}")
+    if filter_scope not in FILTER_SCOPES:
+        raise ValueError(f"Unsupported review filter scope: {filter_scope}")
 
     terms = _normalized_terms(query)
+    marked = {Path(path) for path in (marked_paths or ())}
+
+    def in_scope(photo) -> bool:
+        path = Path(photo.path)
+        if filter_scope == "marked":
+            return path in marked
+        if filter_scope == "unmarked":
+            return path not in marked
+        return True
+
     indexed = [
         (index, photo)
         for index, photo in enumerate(photos)
-        if all(term in _search_text(photo) for term in terms)
+        if in_scope(photo) and all(term in _search_text(photo) for term in terms)
     ]
 
     recommended = Path(recommended_path) if recommended_path is not None else None
