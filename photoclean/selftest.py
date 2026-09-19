@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import scan
-from .bad_shots_gui import PhotoCleanApp
+from .space_hunter_gui import PhotoCleanApp
 
 
 def run(destination):
@@ -32,6 +32,7 @@ def run(destination):
             assert 'Smart Keep' in app.status.get()
             assert 'Pewne duplikaty' in app.summary.get()
             assert hasattr(app, 'open_bad_shot_finder')
+            assert hasattr(app, 'open_space_hunter')
             app.files.selection_set("0")
             app.toggle_mark()
             assert len(app.marked) == 1
@@ -48,6 +49,7 @@ def run(destination):
             app = PhotoCleanApp(root, Path(folder) / 'settings.json')
             assert app.language_var.get() == 'English'
             assert hasattr(app, 'open_bad_shot_finder')
+            assert hasattr(app, 'open_space_hunter')
             root.after_cancel(app.poll_id)
             report = {
                 "ok": True,
@@ -58,6 +60,7 @@ def run(destination):
                 "smart_keep_visible": True,
                 "folder_health_visible": True,
                 "bad_shot_finder_available": True,
+                "space_hunter_available": True,
                 "recycle_executed": False,
             }
     except Exception as error:
