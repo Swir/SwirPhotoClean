@@ -12,6 +12,7 @@ from PIL import Image
 from .compare_insights_gui import PhotoCleanApp
 from .core import scan
 from .selftest import run as run_base
+from .session import SessionSnapshot, audit_session_snapshot
 
 
 def _canonical(result):
@@ -37,6 +38,17 @@ def run(destination):
             eco = scan([folder], performance_profile="eco")
             fast = scan([folder], performance_profile="fast")
             assert _canonical(eco) == _canonical(fast)
+
+            session_snapshot = SessionSnapshot(
+                roots=(folder,),
+                threshold=6,
+                include_similar=True,
+                result=eco,
+            )
+            session_audit = audit_session_snapshot(session_snapshot)
+            assert session_audit.stale_count == 0
+            assert session_audit.valid_count == len(eco.photos)
+            assert session_audit.snapshot.result.groups == eco.groups
 
             settings = folder / "settings.json"
             root = tk.Tk()
@@ -82,6 +94,8 @@ def run(destination):
             review_filter_non_destructive=True,
             integrated_fullscreen_difference_available=True,
             fullscreen_review_insights_available=True,
+            session_resume_preflight_available=True,
+            session_resume_preflight_non_destructive=True,
         )
     except Exception as error:
         report["ok"] = False

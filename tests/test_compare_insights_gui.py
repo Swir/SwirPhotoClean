@@ -4,6 +4,7 @@ import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from PIL import Image, ImageDraw
@@ -11,6 +12,7 @@ from PIL import Image, ImageDraw
 from photoclean import i18n
 from photoclean.compare_insights_gui import InsightFullscreenCompare, PhotoCleanApp
 from photoclean.core import scan
+from photoclean.session import SessionSnapshot
 
 
 def jpeg_fixture(path, size=(640, 480), accent="#33aa55", captured="2026:09:19 21:30:00"):
@@ -152,6 +154,41 @@ class CompareInsightsGuiTests(unittest.TestCase):
                 self.assertEqual(compare.call_args.kwargs["group_kind"], "exact")
                 self.assertEqual(app.marked, before)
                 self.assertIs(app.compare_view, compare.return_value)
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
+    def test_final_session_resume_runs_freshness_audit_and_clears_marks(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = PhotoCleanApp(root, self.settings_path)
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                first = Path(folder) / "a.png"
+                second = Path(folder) / "b.png"
+                png_fixture(first)
+                shutil.copy2(first, second)
+                result = scan([folder])
+                loaded = SessionSnapshot((Path(folder),), 6, True, result)
+                audit = SimpleNamespace(snapshot=loaded, stale_count=1)
+                app.marked.add(result.photos[0].path)
+
+                with patch(
+                    "photoclean.compare_insights_gui.filedialog.askopenfilename",
+                    return_value="review.swirpc",
+                ), patch(
+                    "photoclean.compare_insights_gui.load_session",
+                    return_value=loaded,
+                ), patch(
+                    "photoclean.compare_insights_gui.audit_session_snapshot",
+                    return_value=audit,
+                ) as preflight:
+                    app.load_session_dialog()
+
+                preflight.assert_called_once_with(loaded)
+                self.assertFalse(app.marked)
+                self.assertIs(app.result, loaded.result)
+                self.assertIn("odrzucono nieaktualne: 1", app.status.get())
         finally:
             root.after_cancel(app.poll_id)
             root.destroy()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 from . import i18n
 from .core import Group
@@ -17,8 +17,9 @@ from .fullscreen_plus_gui import (
     PhotoCleanApp as FullscreenPhotoCleanApp,
 )
 from .library import read_library_metadata
-from .pro_gui import session_tr
+from .pro_gui import SESSION_EXTENSION, session_tr
 from .quality import assess_photo, recommend_keeper_with_quality
+from .session import SessionError, audit_session_snapshot, load_session
 
 
 INSIGHT_EN = {
@@ -37,6 +38,13 @@ INSIGHT_EN = {
     ),
     "Smart Keep: alternatywa • porównaj ręcznie przed decyzją": (
         "Smart Keep: alternative • review manually before deciding"
+    ),
+    "Wczytano sesję • {v0} zdjęć • {v1} grup • odrzucono nieaktualne: {v2} • zaznaczenia do kosza wyczyszczone": (
+        "Session loaded • {v0} photos • {v1} groups • stale entries skipped: {v2} • Recycle Bin selections cleared"
+    ),
+    "Sesja nie zawiera już aktualnych zdjęć": "Session has no current photos left",
+    "Wszystkie zdjęcia zapisane w sesji są niedostępne, zmieniły się albo są dowiązaniami. Uruchom nowy skan.": (
+        "All photos saved in this session are unavailable, changed, or links/reparse points. Run a new scan."
     ),
 }
 
@@ -137,7 +145,69 @@ class InsightFullscreenCompare(IntegratedFullscreenCompare):
 
 
 class PhotoCleanApp(FullscreenPhotoCleanApp):
-    """Final app wiring the explainable fullscreen insight layer."""
+    """Final app wiring review insights and stale-safe session resume."""
+
+    def load_session_dialog(self):
+        """Resume a session only after a fast read-only on-disk freshness audit."""
+        if self.busy:
+            return
+        source = filedialog.askopenfilename(
+            title=session_tr("Otwórz sesję"),
+            filetypes=[
+                (session_tr("Sesja SWIR PhotoClean"), f"*{SESSION_EXTENSION}"),
+                ("JSON", "*.json"),
+                (session_tr("Wszystkie pliki"), "*.*"),
+            ],
+        )
+        if not source:
+            return
+        try:
+            loaded = load_session(source)
+            audit = audit_session_snapshot(loaded)
+        except (OSError, SessionError) as error:
+            messagebox.showerror(session_tr("Nie można otworzyć sesji"), str(error))
+            return
+
+        snapshot = audit.snapshot
+        if loaded.result.photos and not snapshot.result.photos:
+            messagebox.showerror(
+                insight_tr("Sesja nie zawiera już aktualnych zdjęć"),
+                insight_tr(
+                    "Wszystkie zdjęcia zapisane w sesji są niedostępne, zmieniły się albo są dowiązaniami. Uruchom nowy skan."
+                ),
+            )
+            return
+
+        existing = getattr(self, "compare_view", None)
+        if existing is not None and existing.window.winfo_exists():
+            existing.window.destroy()
+        self.compare_view = None
+
+        self.folders.delete(0, "end")
+        for root in snapshot.roots:
+            self.folders.insert("end", str(root))
+        self.similarity.set(snapshot.include_similar)
+        self._set_threshold_control(snapshot.threshold)
+        self.result = snapshot.result
+        self.marked.clear()
+        self.render_groups()
+        if audit.stale_count:
+            self.status.set(
+                insight_tr(
+                    "Wczytano sesję • {v0} zdjęć • {v1} grup • odrzucono nieaktualne: {v2} • zaznaczenia do kosza wyczyszczone",
+                    v0=len(self.result.photos),
+                    v1=len(self.result.groups),
+                    v2=audit.stale_count,
+                )
+            )
+        else:
+            self.status.set(
+                session_tr(
+                    "Wczytano sesję • {v0} zdjęć • {v1} grup • zaznaczenia do kosza wyczyszczone",
+                    v0=len(self.result.photos),
+                    v1=len(self.result.groups),
+                )
+            )
 
     def open_fullscreen_compare(self):
         if self.busy:
