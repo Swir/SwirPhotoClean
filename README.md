@@ -181,7 +181,7 @@ Run source tests:
 python tools/readme_progress.py --check
 ```
 
-The pull-request workflow uses Python 3.12 on Windows, runs the test suite, builds the PyInstaller onedir package and executes the packaged `SwirPhotoClean.exe --self-test` path before uploading an artifact. Stable/release claims remain separate from CI success.
+The pull-request workflow uses Python 3.12 on Windows, runs the test suite, builds the PyInstaller onedir package and executes the packaged `SwirPhotoClean.exe --self-test` path before uploading an artifact. `tools/release_gate.py` also fails closed for release metadata: 0.x / explicit RC versions stay prerelease, while a stable 1.x release is blocked until the authoritative `STATUS.md` acceptance checklist is complete and `RELEASE_NOTES.md` matches the exact version.
 
 ## 📦 Releases
 

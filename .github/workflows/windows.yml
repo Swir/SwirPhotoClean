@@ -18,6 +18,8 @@ jobs:
           cache: pip
       - name: Verify README progress contract
         run: python tools/readme_progress.py --check
+      - name: Verify release safety contract
+        run: python tools/release_gate.py --check
       - run: python -m pip install -r requirements-build.txt
       - name: Compile Python modules
         run: python -m compileall -q photoclean tools
@@ -65,6 +67,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify release gate
+        run: |
+          python tools/readme_progress.py --check
+          python tools/release_gate.py --check
       - uses: actions/download-artifact@v4
         with:
           name: SwirPhotoClean-windows-portable
@@ -81,5 +90,13 @@ jobs:
           Compress-Archive -Path package/SwirPhotoClean -DestinationPath $archive
           $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
           "$digest  $archive" | Set-Content "$archive.sha256" -Encoding utf8
-          gh release create "v$version" $archive "$archive.sha256" --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md --prerelease
+          $channel = (python tools/release_gate.py --channel).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Release gate failed' }
+          if ($channel -eq 'stable') {
+            gh release create "v$version" $archive "$archive.sha256" --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md
+          } elseif ($channel -eq 'prerelease') {
+            gh release create "v$version" $archive "$archive.sha256" --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md --prerelease
+          } else {
+            throw "Unknown release channel: $channel"
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
