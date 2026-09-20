@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from PIL import Image, ImageDraw
 
-from photoclean.core import scan, sha256
+from photoclean.core import _analysis_rgb, scan, sha256
 from photoclean.performance import (
     DEFAULT_PROFILE,
     PROFILES,
@@ -72,6 +72,29 @@ class PerformanceProfileTests(unittest.TestCase):
             fast_digest = sha256(target, cancel, "fast")
             sleep.assert_not_called()
         self.assertEqual(eco_digest, fast_digest)
+
+    def test_common_opaque_rgb_analysis_reuses_source_buffer(self):
+        image = Image.new("RGB", (64, 48), (20, 40, 60))
+        analyzed = _analysis_rgb(image)
+        self.assertIs(analyzed, image)
+        self.assertEqual(analyzed.getpixel((0, 0)), (20, 40, 60))
+
+    def test_transparent_analysis_keeps_white_matte_semantics(self):
+        image = Image.new("RGBA", (1, 1), (255, 0, 0, 0))
+        analyzed = _analysis_rgb(image)
+        self.assertEqual(analyzed.mode, "RGB")
+        self.assertEqual(analyzed.getpixel((0, 0)), (255, 255, 255))
+
+    def test_unrotated_scan_avoids_exif_transpose_copy(self):
+        with patch(
+            "photoclean.core.ImageOps.exif_transpose",
+            side_effect=AssertionError("unexpected full-size orientation copy"),
+        ):
+            result = scan([self.root])
+        self.assertFalse(result.cancelled)
+        self.assertEqual(len(result.photos), 3)
+        self.assertTrue(any(group.kind == "exact" for group in result.groups))
+        self.assertTrue(any(group.kind == "similar" for group in result.groups))
 
     def test_profile_setting_roundtrip_is_separate_from_language_file(self):
         settings = self.root / "settings.json"
