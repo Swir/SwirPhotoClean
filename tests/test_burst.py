@@ -2,19 +2,37 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import ExifTags, Image
 
 from photoclean.burst import burst_sequences, read_capture_time
 from photoclean.core import Group, Photo, ScanResult
 
 
-def make_jpeg(path: Path, timestamp: str | None):
+def make_jpeg(
+    path: Path,
+    timestamp: str | None,
+    *,
+    make: str | None = None,
+    model: str | None = None,
+    nested: bool = False,
+    subsecond: str | None = None,
+):
     image = Image.new("RGB", (64, 48), (70, 110, 150))
-    if timestamp is None:
-        image.save(path, format="JPEG")
-        return
     exif = Image.Exif()
-    exif[36867] = timestamp
+    if timestamp is not None:
+        if nested:
+            nested_exif = {36867: timestamp}
+            if subsecond is not None:
+                nested_exif[37521] = subsecond
+            exif[ExifTags.IFD.Exif] = nested_exif
+        else:
+            exif[36867] = timestamp
+            if subsecond is not None:
+                exif[37521] = subsecond
+    if make is not None:
+        exif[271] = make
+    if model is not None:
+        exif[272] = model
     image.save(path, format="JPEG", exif=exif)
 
 
@@ -43,6 +61,23 @@ class BurstMetadataTests(unittest.TestCase):
             self.assertEqual(capture.source, "DateTimeOriginal")
             self.assertEqual(capture.value.year, 2026)
             self.assertEqual(capture.value.second, 3)
+
+    def test_reads_standard_nested_datetime_original_with_subseconds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "camera.jpg"
+            make_jpeg(
+                path,
+                "2026:09:19 01:02:03",
+                make="Canon",
+                model="EOS R8",
+                nested=True,
+                subsecond="1234567",
+            )
+            capture = read_capture_time(path)
+            self.assertIsNotNone(capture)
+            self.assertEqual(capture.source, "DateTimeOriginal")
+            self.assertEqual(capture.value.microsecond, 123456)
+            self.assertEqual(capture.camera_label, "Canon EOS R8")
 
     def test_missing_exif_is_not_guessed_from_file_time(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -83,6 +118,31 @@ class BurstSequenceTests(unittest.TestCase):
             group = Group("similar", tuple(photos))
             sequences = burst_sequences(ScanResult(photos=photos, groups=[group]), max_gap_seconds=3)
             self.assertEqual([len(item.photos) for item in sequences], [2, 2])
+
+    def test_splits_close_frames_when_known_camera_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            photos = []
+            cameras = [
+                ("Canon", "EOS R8"),
+                ("Canon", "EOS R8"),
+                ("Sony", "A7 IV"),
+                ("Sony", "A7 IV"),
+            ]
+            for index, (make, model) in enumerate(cameras):
+                path = root / f"frame-{index}.jpg"
+                make_jpeg(
+                    path,
+                    f"2026:09:19 01:00:0{index}",
+                    make=make,
+                    model=model,
+                    nested=True,
+                )
+                photos.append(photo(path, digest=f"{index + 1:064x}"))
+            group = Group("similar", tuple(photos))
+            sequences = burst_sequences(ScanResult(photos=photos, groups=[group]), max_gap_seconds=3)
+            self.assertEqual([len(item.photos) for item in sequences], [2, 2])
+            self.assertEqual([item.camera_label for item in sequences], ["Canon EOS R8", "Sony A7 IV"])
 
     def test_exact_groups_are_not_burst_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
