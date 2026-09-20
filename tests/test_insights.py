@@ -152,6 +152,23 @@ class FolderHealthTests(unittest.TestCase):
         self.assertEqual(health.similar_groups, 1)
         self.assertEqual(health.similar_review_files, 2)
 
+    def test_largest_files_preserve_historical_descending_order(self):
+        items = [
+            photo("a.jpg", size=100),
+            photo("b.jpg", size=300),
+            photo("c.jpg", size=200),
+            photo("z.jpg", size=300),
+        ]
+        health = folder_health(ScanResult(photos=items), largest_limit=3)
+        self.assertEqual(
+            [item.path.name for item in health.largest_files],
+            ["z.jpg", "b.jpg", "c.jpg"],
+        )
+
+    def test_zero_largest_limit_avoids_rows(self):
+        health = folder_health(ScanResult(photos=[photo("a.jpg")]), largest_limit=0)
+        self.assertEqual(health.largest_files, ())
+
     def test_negative_largest_limit_is_rejected(self):
         with self.assertRaises(ValueError):
             folder_health(ScanResult(), largest_limit=-1)

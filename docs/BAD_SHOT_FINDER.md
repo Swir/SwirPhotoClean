@@ -23,7 +23,13 @@ The UI orders candidates by review priority and shows the underlying quality, sh
 
 ## Performance and cancellation
 
-The review is started on demand from **View → Blur / bad-shot review…** (`Ctrl+Shift+B`). Analysis runs on a worker thread; Tk is updated only through the GUI event queue. The operation can be cancelled at any time. For very large collections the engine keeps only the highest-priority rows in the table while still reporting the total number of candidates found.
+The review is started on demand from **View → Blur / bad-shot review…** (`Ctrl+Shift+B`). Analysis runs on a worker thread; Tk is updated only through the GUI event queue. The operation can be cancelled at any time.
+
+For the normal production input (`ScanResult.photos`, a sized list), the finder now streams the existing collection directly instead of first duplicating every photo reference into another tuple. Candidate retention is also bounded: only the highest-priority `max_results` rows are kept in a min-heap while `candidate_count` still records every flagged photo. With the default limit this means the review table retains at most 300 candidate objects regardless of how many lower-priority candidates are found. The final order is intentionally identical to the previous full-list sort, including stable handling at the cutoff.
+
+Unsized custom iterables are still materialized as a compatibility fallback because the existing progress callback requires a stable total count. The desktop application does not use that fallback path.
+
+A dedicated manual benchmark is available as `python tools/benchmark_bad_shot_retention.py`. It uses synthetic in-memory `Photo` records and a deterministic analyzer, touches no source photos, and reports elapsed time plus `tracemalloc` peak memory without imposing a brittle timing gate.
 
 ## Limitations
 

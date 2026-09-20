@@ -7,6 +7,8 @@ local quality analysis used by Smart Keep.
 """
 from __future__ import annotations
 
+import heapq
+from collections.abc import Sized
 from dataclasses import dataclass
 from threading import Event
 from typing import Callable, Iterable
@@ -75,6 +77,30 @@ def classify_quality(quality: PhotoQuality) -> BadShotCandidate | None:
     )
 
 
+def _candidate_sort_key(item: BadShotCandidate) -> tuple[float, float, str]:
+    """Match the historical highest-priority-first candidate ordering."""
+
+    return (
+        item.severity,
+        -item.quality.overall_score,
+        str(item.photo.path).casefold(),
+    )
+
+
+def _stream_with_total(photos: Iterable[Photo]) -> tuple[Iterable[Photo], int]:
+    """Avoid copying normal scanner lists while preserving progress totals.
+
+    ``ScanResult.photos`` is a sized list, so the production path can stream it
+    directly. Unsized iterables are materialized only as a compatibility fallback
+    because the public progress callback expects a stable total count.
+    """
+
+    if isinstance(photos, Sized):
+        return photos, len(photos)
+    items = tuple(photos)
+    return items, len(items)
+
+
 def find_bad_shot_candidates(
     photos: Iterable[Photo],
     *,
@@ -86,16 +112,17 @@ def find_bad_shot_candidates(
     """Analyze a completed scan without mutating files or Recycle Bin marks.
 
     Analysis is cancellable and reports progress without touching Tk. All photos
-    are inspected unless cancellation is requested; only the highest-severity
-    ``max_results`` candidates are retained for the review table.
+    are inspected unless cancellation is requested. For normal sized scanner
+    inputs the function streams the existing list directly, and candidate
+    retention is bounded to ``max_results`` with a small heap instead of storing
+    every flagged photo before sorting.
     """
 
     if max_results < 1:
         raise ValueError("max_results must be at least 1")
 
-    items = tuple(photos)
-    total = len(items)
-    candidates: list[BadShotCandidate] = []
+    items, total = _stream_with_total(photos)
+    retained: list[tuple[tuple[float, float, str], int, BadShotCandidate]] = []
     analyzed = 0
     unavailable = 0
     candidate_count = 0
@@ -114,26 +141,27 @@ def find_bad_shot_candidates(
             candidate = classify_quality(quality)
             if candidate is not None:
                 candidate_count += 1
-                candidates.append(candidate)
+                # Higher sort keys are higher review priority. ``-index`` keeps
+                # equal-key behavior stable with the previous full-list sort:
+                # earlier input wins the max_results cutoff.
+                entry = (_candidate_sort_key(candidate), -index, candidate)
+                if len(retained) < max_results:
+                    heapq.heappush(retained, entry)
+                elif entry[:2] > retained[0][:2]:
+                    heapq.heapreplace(retained, entry)
 
         # Avoid flooding the GUI queue on very large libraries while still
         # keeping progress responsive.
         if progress is not None and (index == total or index % 10 == 0):
             progress(index, total)
 
-    candidates.sort(
-        key=lambda item: (
-            item.severity,
-            -item.quality.overall_score,
-            str(item.photo.path).casefold(),
-        ),
-        reverse=True,
+    ordered = tuple(
+        entry[2]
+        for entry in sorted(retained, key=lambda entry: (entry[0], entry[1]), reverse=True)
     )
-    if len(candidates) > max_results:
-        candidates = candidates[:max_results]
 
     return BadShotScan(
-        candidates=tuple(candidates),
+        candidates=ordered,
         analyzed_count=analyzed,
         unavailable_count=unavailable,
         candidate_count=candidate_count,

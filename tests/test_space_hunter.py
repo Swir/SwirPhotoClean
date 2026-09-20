@@ -78,6 +78,54 @@ class SpaceHunterTests(unittest.TestCase):
         self.assertEqual(report.largest_folders[0].total_bytes, 400)
         self.assertEqual(report.largest_folders[0].photo_count, 2)
 
+    def test_repeated_exact_groups_are_collapsed_by_digest(self):
+        a = photo("a.jpg", size=1000, digest="same")
+        b = photo("b.jpg", size=1000, digest="same")
+        c = photo("c.jpg", size=1000, digest="same")
+        result = ScanResult(
+            photos=[a, b, c],
+            groups=[
+                Group("exact", (a, b)),
+                Group("exact", (b, c)),
+                Group("exact", (a, b, c)),
+            ],
+        )
+
+        report = build_space_report(result)
+
+        self.assertEqual(report.exact_duplicate_files, 2)
+        self.assertEqual(report.exact_reclaimable_bytes, 2000)
+        self.assertTrue(all(item.exact_group_size == 3 for item in report.largest_files))
+        self.assertTrue(all(item.exact_group_reclaimable_bytes == 2000 for item in report.largest_files))
+
+    def test_group_member_outside_scan_cannot_inflate_savings(self):
+        a = photo("a.jpg", size=1000, digest="same")
+        b = photo("b.jpg", size=1000, digest="same")
+        injected = photo("outside.jpg", size=50_000_000, digest="same")
+        result = ScanResult(
+            photos=[a, b],
+            groups=[Group("exact", (a, b, injected))],
+        )
+
+        report = build_space_report(result)
+
+        self.assertEqual(report.exact_duplicate_files, 1)
+        self.assertEqual(report.exact_reclaimable_bytes, 1000)
+        self.assertEqual(report.total_bytes, 2000)
+        self.assertTrue(all(item.exact_group_size == 2 for item in report.largest_files))
+
+    def test_single_valid_similar_member_is_not_labeled(self):
+        a = photo("a.jpg", size=2000)
+        injected = photo("outside.jpg", size=1000)
+        result = ScanResult(
+            photos=[a],
+            groups=[Group("similar", (a, injected))],
+        )
+
+        report = build_space_report(result)
+
+        self.assertEqual(report.largest_files[0].status, "other")
+
     def test_zero_limits_return_only_summary(self):
         result = ScanResult(photos=[photo("a.jpg", size=123)])
         report = build_space_report(result, file_limit=0, folder_limit=0)
