@@ -9,10 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "photoclean" / "__init__.py"
 RELEASE_NOTES = ROOT / "RELEASE_NOTES.md"
 
-_VERSION_ASSIGNMENT = re.compile(r'__version__\\s*=\\s*"([^"]+)"')
+_VERSION_ASSIGNMENT = re.compile(r'__version__\s*=\s*"([^"]+)"')
 _SEMVER = re.compile(
-    r"^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)"
-    r"(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$"
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
 )
 
 
