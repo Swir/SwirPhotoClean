@@ -5,10 +5,12 @@ import json
 import shutil
 import tempfile
 import tkinter as tk
+import uuid
 from pathlib import Path
 
 from PIL import Image
 
+from . import i18n
 from .core import scan
 from .folder_health_app import PhotoCleanApp
 from .insights import folder_health
@@ -23,14 +25,46 @@ def _canonical(result):
     )
 
 
-def run(destination):
+def _probe_portable_storage(settings_path: Path) -> tuple[bool, bool]:
+    """Verify that portable settings are local and writable without keeping state."""
+
+    settings_path = Path(settings_path).resolve()
+    data_dir = settings_path.parent
+    created_dir = not data_dir.exists()
+    probe = data_dir / f".settings-selftest-{uuid.uuid4().hex}.json"
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        i18n.save_language(probe, "en")
+        writable = i18n.load_language(probe) == "en"
+        local = settings_path.name == "settings.json" and data_dir.name == "data"
+        return local, writable
+    finally:
+        probe.unlink(missing_ok=True)
+        if created_dir:
+            try:
+                data_dir.rmdir()
+            except OSError:
+                pass
+
+
+def run(destination, settings_path=None):
     destination = Path(destination)
     code = run_base(destination)
     if code:
         return code
     report = json.loads(destination.read_text(encoding="utf-8"))
     root = None
+    portable_mode_exercised = settings_path is not None
+    portable_settings_local = False
+    portable_data_dir_writable = False
     try:
+        if portable_mode_exercised:
+            portable_settings_local, portable_data_dir_writable = _probe_portable_storage(
+                Path(settings_path)
+            )
+            assert portable_settings_local
+            assert portable_data_dir_writable
+
         with tempfile.TemporaryDirectory(prefix="swir-photoclean-profile-smoke-") as folder:
             folder = Path(folder)
             image = folder / "a.png"
@@ -116,6 +150,9 @@ def run(destination):
             folder_health_center_available=True,
             folder_health_exact_savings_conservative=True,
             folder_health_non_destructive=True,
+            portable_mode_exercised=portable_mode_exercised,
+            portable_settings_local=portable_settings_local,
+            portable_data_dir_writable=portable_data_dir_writable,
         )
     except Exception as error:
         report["ok"] = False

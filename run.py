@@ -20,10 +20,15 @@ def prepare_frozen_tk():
 
 if __name__ == "__main__":
     prepare_frozen_tk()
-    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+
+    from photoclean.storage import resolve_runtime_storage
+
+    runtime = resolve_runtime_storage()
+    if len(runtime.argv) == 2 and runtime.argv[0] == "--self-test":
         from photoclean.selftest_performance import run
 
-        raise SystemExit(run(sys.argv[2]))
+        raise SystemExit(run(runtime.argv[1], settings_path=runtime.settings_path))
+
     from photoclean.folder_health_app import main
 
-    main()
+    main(settings_path=runtime.settings_path)
