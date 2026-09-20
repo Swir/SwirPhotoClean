@@ -39,3 +39,5 @@ Actual cleanup remains in the normal review workflow. Before any selected file c
 ## Language and large libraries
 
 The center is available in Polish and English. It renders a bounded largest-files list and caps the notice text shown in the window, while the underlying scan result remains unchanged. Refreshing the center recalculates only in-memory summary data and never starts another disk scan.
+
+The largest-files selection uses a bounded top-K heap instead of sorting the complete photo list. Exact groups are streamed from `ScanResult.groups` into the conservative digest buckets without first creating separate exact/similar group lists, and grouped-file counts avoid an additional full union set. These changes preserve the existing ordering and safety semantics while reducing transient CPU/memory overhead on large scans.

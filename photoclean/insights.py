@@ -5,7 +5,9 @@ produces conservative review signals such as Smart Keep and Folder Health.
 """
 from __future__ import annotations
 
+import heapq
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -147,7 +149,7 @@ def recommend_keeper(group: Group) -> KeeperRecommendation:
 
 
 def _exact_digest_buckets(
-    groups: list[Group],
+    groups: Iterable[Group],
     scanned_by_path: dict[Path, Photo],
 ) -> dict[str, dict[Path, Photo]]:
     """Deduplicate trustworthy exact membership by SHA-256 digest and path.
@@ -179,26 +181,36 @@ def folder_health(result: ScanResult, largest_limit: int = 5) -> FolderHealth:
     the total. Similar groups are review candidates only. `grouped_files` is the
     unique union of exact and similar result members; `unflagged_files` are scanned
     photos that currently appear in neither type of result group.
+
+    Large-file selection uses a bounded top-K heap, so opening/refreshing Folder
+    Health no longer sorts an entire large library merely to render a handful of
+    rows.
     """
 
     if largest_limit < 0:
         raise ValueError("largest_limit must be non-negative")
 
-    exact_groups = [group for group in result.groups if group.kind == "exact"]
-    similar_groups = [group for group in result.groups if group.kind == "similar"]
-
     scanned_by_path = {photo.path: photo for photo in result.photos}
-    scanned_paths = set(scanned_by_path)
-    exact_buckets = _exact_digest_buckets(exact_groups, scanned_by_path)
+    exact_buckets = _exact_digest_buckets(
+        (group for group in result.groups if group.kind == "exact"),
+        scanned_by_path,
+    )
     exact_paths = {path for bucket in exact_buckets.values() for path in bucket}
 
     similar_member_sets = {
-        frozenset(photo.path for photo in group.photos if photo.path in scanned_paths)
-        for group in similar_groups
+        frozenset(
+            photo.path
+            for photo in group.photos
+            if photo.path in scanned_by_path
+        )
+        for group in result.groups
+        if group.kind == "similar"
     }
     similar_member_sets = {members for members in similar_member_sets if len(members) >= 2}
     similar_paths = set().union(*similar_member_sets) if similar_member_sets else set()
-    grouped_paths = exact_paths | similar_paths
+    grouped_files = len(exact_paths) + sum(
+        1 for path in similar_paths if path not in exact_paths
+    )
 
     exact_duplicate_files = 0
     exact_reclaimable_bytes = 0
@@ -219,19 +231,23 @@ def folder_health(result: ScanResult, largest_limit: int = 5) -> FolderHealth:
     exact_reclaimable_percent = (
         (exact_reclaimable_bytes / total_bytes) * 100.0 if total_bytes else 0.0
     )
-    largest_files = tuple(
-        sorted(
-            result.photos,
-            key=lambda photo: (photo.size, str(photo.path).casefold()),
-            reverse=True,
-        )[:largest_limit]
+    largest_files = (
+        tuple(
+            heapq.nlargest(
+                largest_limit,
+                result.photos,
+                key=lambda photo: (photo.size, str(photo.path).casefold()),
+            )
+        )
+        if largest_limit
+        else ()
     )
 
     return FolderHealth(
         total_photos=len(result.photos),
         total_bytes=total_bytes,
-        grouped_files=len(grouped_paths),
-        unflagged_files=max(0, len(result.photos) - len(grouped_paths)),
+        grouped_files=grouped_files,
+        unflagged_files=max(0, len(result.photos) - grouped_files),
         exact_groups=len(exact_buckets),
         exact_group_members=len(exact_paths),
         exact_duplicate_files=exact_duplicate_files,
