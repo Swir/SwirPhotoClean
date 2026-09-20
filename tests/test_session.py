@@ -4,7 +4,15 @@ import unittest
 from pathlib import Path
 
 from photoclean.core import Group, Photo, ScanResult
-from photoclean.session import SessionError, SessionSnapshot, load_session, save_session, snapshot_from_dict, snapshot_to_dict
+from photoclean.session import (
+    SessionError,
+    SessionSnapshot,
+    audit_session_snapshot,
+    load_session,
+    save_session,
+    snapshot_from_dict,
+    snapshot_to_dict,
+)
 
 
 def photo(path, *, digest="a" * 64, size=1000, inode=1):
@@ -14,6 +22,22 @@ def photo(path, *, digest="a" * 64, size=1000, inode=1):
         modified_ns=123,
         device=1,
         inode=inode,
+        digest=digest,
+        width=320,
+        height=240,
+        dhash=42,
+        color=bytes(range(192)),
+    )
+
+
+def photo_from_file(path: Path, *, digest="a" * 64):
+    info = path.stat()
+    return Photo(
+        path=path,
+        size=info.st_size,
+        modified_ns=info.st_mtime_ns,
+        device=info.st_dev,
+        inode=info.st_ino,
         digest=digest,
         width=320,
         height=240,
@@ -122,6 +146,72 @@ class SessionTests(unittest.TestCase):
                     save_session(snapshot, target)
             self.assertEqual(target.read_text(encoding="utf-8"), "original")
             self.assertEqual([path.name for path in Path(folder).iterdir()], ["review.swirphoto"])
+
+    def test_resume_audit_keeps_unchanged_members_and_group(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first_path = root / "a.jpg"
+            second_path = root / "b.jpg"
+            first_path.write_bytes(b"same-fixture")
+            second_path.write_bytes(b"same-fixture")
+            first = photo_from_file(first_path, digest="a" * 64)
+            second = photo_from_file(second_path, digest="a" * 64)
+            snapshot = SessionSnapshot(
+                (root,),
+                6,
+                True,
+                ScanResult(
+                    photos=[first, second],
+                    groups=[Group("exact", (first, second))],
+                ),
+            )
+
+            audit = audit_session_snapshot(snapshot)
+
+            self.assertEqual(audit.checked_count, 2)
+            self.assertEqual(audit.valid_count, 2)
+            self.assertEqual(audit.stale_count, 0)
+            self.assertEqual(audit.dropped_group_count, 0)
+            self.assertEqual(audit.snapshot.result.photos, [first, second])
+            self.assertEqual(audit.snapshot.result.groups, [Group("exact", (first, second))])
+            self.assertEqual(audit.snapshot.result.warnings, [])
+
+    def test_resume_audit_drops_changed_and_missing_members(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first_path = root / "a.jpg"
+            changed_path = root / "b.jpg"
+            missing_path = root / "c.jpg"
+            for path in (first_path, changed_path, missing_path):
+                path.write_bytes(b"original-fixture")
+            first = photo_from_file(first_path, digest="a" * 64)
+            changed = photo_from_file(changed_path, digest="b" * 64)
+            missing = photo_from_file(missing_path, digest="c" * 64)
+            snapshot = SessionSnapshot(
+                (root,),
+                6,
+                True,
+                ScanResult(
+                    photos=[first, changed, missing],
+                    groups=[Group("similar", (first, changed, missing))],
+                ),
+            )
+
+            changed_path.write_bytes(b"changed-fixture-with-different-size")
+            missing_path.unlink()
+            audit = audit_session_snapshot(snapshot)
+
+            self.assertEqual(audit.checked_count, 3)
+            self.assertEqual(audit.valid_count, 1)
+            self.assertEqual(audit.changed_count, 1)
+            self.assertEqual(audit.missing_count, 1)
+            self.assertEqual(audit.stale_count, 2)
+            self.assertEqual(audit.dropped_group_count, 1)
+            self.assertEqual(audit.snapshot.result.photos, [first])
+            self.assertEqual(audit.snapshot.result.groups, [])
+            self.assertTrue(
+                any("Session resume preflight:" in warning for warning in audit.snapshot.result.warnings)
+            )
 
 
 if __name__ == "__main__":

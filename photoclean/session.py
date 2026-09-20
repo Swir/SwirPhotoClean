@@ -12,7 +12,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from .core import MAX_PIXELS, Group, Photo, ScanResult
+from .core import MAX_PIXELS, Group, Photo, ScanResult, linked, signature
 
 FORMAT = "swir-photoclean-session"
 VERSION = 1
@@ -32,6 +32,29 @@ class SessionSnapshot:
     threshold: int
     include_similar: bool
     result: ScanResult
+
+
+@dataclass(frozen=True)
+class SessionAudit:
+    """Read-only resume preflight against the files currently on disk.
+
+    The audit intentionally checks only filesystem identity/metadata. It is a fast
+    stale-session filter, not deletion evidence. Any later Recycle Bin action still
+    performs the normal full content revalidation before a file can move.
+    """
+
+    snapshot: SessionSnapshot
+    checked_count: int
+    valid_count: int
+    missing_count: int
+    changed_count: int
+    unavailable_count: int
+    unsafe_link_count: int
+    dropped_group_count: int
+
+    @property
+    def stale_count(self) -> int:
+        return self.checked_count - self.valid_count
 
 
 def _require_int(value, name, *, minimum=None, maximum=None):
@@ -183,6 +206,103 @@ def snapshot_from_dict(raw):
     warnings = [_require_text(item, "warning", max_length=65_536) for item in warnings_raw]
     result = ScanResult(photos=photos, groups=groups, warnings=warnings, cancelled=False)
     return SessionSnapshot(roots=roots, threshold=threshold, include_similar=include_similar, result=result)
+
+
+def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20) -> SessionAudit:
+    """Drop stale session members before review without touching any source file.
+
+    A resumed session can outlive the files it describes. This preflight compares
+    each saved member with its current filesystem signature and rejects missing,
+    changed, unavailable or linked/reparse entries. Groups are rebuilt only from
+    surviving members and groups with fewer than two members are dropped.
+
+    This is deliberately *not* a content-hash safety check. It keeps resume fast
+    for large libraries; cleanup still performs the normal full hash/content
+    revalidation immediately before any Recycle Bin operation.
+    """
+
+    _require_int(detail_limit, "detail_limit", minimum=0, maximum=1000)
+    valid: list[Photo] = []
+    invalid_paths: set[Path] = set()
+    detail_lines: list[str] = []
+    missing_count = 0
+    changed_count = 0
+    unavailable_count = 0
+    unsafe_link_count = 0
+
+    def reject(photo: Photo, reason: str):
+        invalid_paths.add(photo.path)
+        if len(detail_lines) < detail_limit:
+            detail_lines.append(f"Session resume skipped {photo.path}: {reason}")
+
+    for photo in snapshot.result.photos:
+        try:
+            if linked(photo.path):
+                unsafe_link_count += 1
+                reject(photo, "link/reparse point")
+                continue
+            current = photo.path.stat()
+        except FileNotFoundError:
+            missing_count += 1
+            reject(photo, "file is missing")
+            continue
+        except OSError as error:
+            unavailable_count += 1
+            reject(photo, f"file is unavailable ({error})")
+            continue
+
+        expected = (photo.size, photo.modified_ns, photo.device, photo.inode)
+        if signature(current) != expected:
+            changed_count += 1
+            reject(photo, "filesystem signature changed since the saved scan")
+            continue
+        valid.append(photo)
+
+    valid_paths = {photo.path for photo in valid}
+    groups: list[Group] = []
+    dropped_group_count = 0
+    for group in snapshot.result.groups:
+        members = tuple(photo for photo in group.photos if photo.path in valid_paths)
+        if len(members) >= 2:
+            groups.append(Group(group.kind, members))
+        else:
+            dropped_group_count += 1
+
+    warnings = list(snapshot.result.warnings)
+    stale_count = len(snapshot.result.photos) - len(valid)
+    audit_warnings: list[str] = []
+    if stale_count:
+        audit_warnings.append(
+            "Session resume preflight: "
+            f"kept {len(valid)}/{len(snapshot.result.photos)} photos; "
+            f"missing={missing_count}, changed={changed_count}, "
+            f"unavailable={unavailable_count}, link/reparse={unsafe_link_count}; "
+            f"dropped groups={dropped_group_count}."
+        )
+        audit_warnings.extend(detail_lines)
+        omitted = stale_count - len(detail_lines)
+        if omitted > 0:
+            audit_warnings.append(f"Session resume skipped {omitted} additional stale entries.")
+
+    available_warning_slots = max(0, MAX_WARNINGS - len(warnings))
+    warnings.extend(audit_warnings[:available_warning_slots])
+    result = ScanResult(photos=valid, groups=groups, warnings=warnings, cancelled=False)
+    sanitized = SessionSnapshot(
+        roots=snapshot.roots,
+        threshold=snapshot.threshold,
+        include_similar=snapshot.include_similar,
+        result=result,
+    )
+    return SessionAudit(
+        snapshot=sanitized,
+        checked_count=len(snapshot.result.photos),
+        valid_count=len(valid),
+        missing_count=missing_count,
+        changed_count=changed_count,
+        unavailable_count=unavailable_count,
+        unsafe_link_count=unsafe_link_count,
+        dropped_group_count=dropped_group_count,
+    )
 
 
 def save_session(snapshot: SessionSnapshot, destination):
