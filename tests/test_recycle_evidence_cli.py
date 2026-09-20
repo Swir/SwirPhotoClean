@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from photoclean.diagnostics import RecycleVerificationError, inspect_recycle_evidence
 from photoclean.recycle_evidence import (
@@ -35,6 +36,37 @@ class RecycleEvidenceCliTests(unittest.TestCase):
             self.assertFalse(payload["acceptance_gate_closed"])
             self.assertEqual(payload["inspection"]["stage"], "restored-verified")
             self.assertTrue(payload["inspection"]["valid"])
+
+    def test_verify_can_resume_report_export_after_post_transition_failure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / "workspace"
+
+            def fake_recycler(path):
+                Path(path).unlink()
+
+            recycled = prepare_restore_evidence(base, recycler=fake_recycler)
+            shutil.copy2(recycled.original, recycled.copy)
+
+            with patch(
+                "photoclean.recycle_evidence.export_recycle_evidence",
+                side_effect=OSError("simulated report write failure"),
+            ):
+                with self.assertRaises(OSError):
+                    verify_restore_evidence(recycled.manifest)
+
+            after_failure = inspect_recycle_evidence(recycled.manifest)
+            self.assertTrue(after_failure.valid)
+            self.assertEqual(after_failure.stage, "restored-verified")
+            self.assertEqual(after_failure.event_count, 3)
+
+            verified, report = verify_restore_evidence(recycled.manifest)
+            self.assertEqual(verified.stage, "restored-verified")
+            self.assertTrue(report.is_file())
+
+            after_retry = inspect_recycle_evidence(recycled.manifest)
+            self.assertTrue(after_retry.valid)
+            self.assertEqual(after_retry.stage, "restored-verified")
+            self.assertEqual(after_retry.event_count, 3)
 
     def test_failed_move_does_not_advance_manifest_or_remove_generated_files(self):
         with tempfile.TemporaryDirectory() as folder:
