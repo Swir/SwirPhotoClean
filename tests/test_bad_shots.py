@@ -37,6 +37,22 @@ def quality(item: Photo, *, overall=80.0, sharpness=80.0, exposure=80.0, availab
     )
 
 
+class CountingSizedPhotos:
+    """Sized one-pass fixture that reveals eager input materialization."""
+
+    def __init__(self, items):
+        self.items = tuple(items)
+        self.iterated = 0
+
+    def __len__(self):
+        return len(self.items)
+
+    def __iter__(self):
+        for item in self.items:
+            self.iterated += 1
+            yield item
+
+
 class BadShotFinderTests(unittest.TestCase):
     def test_soft_photo_is_review_candidate_not_action(self):
         item = photo("soft.jpg")
@@ -63,6 +79,47 @@ class BadShotFinderTests(unittest.TestCase):
         self.assertEqual(result.candidate_count, 2)
         self.assertEqual(len(result.candidates), 1)
         self.assertEqual(result.candidates[0].photo.path.name, "severe.jpg")
+
+    def test_large_candidate_set_keeps_only_top_k_in_historical_order(self):
+        items = [photo(f"item-{index:03d}.jpg") for index in range(50)]
+
+        def analyzer(item):
+            index = int(item.path.stem.rsplit("-", 1)[1])
+            return quality(item, overall=80, sharpness=float(index), exposure=90)
+
+        result = find_bad_shot_candidates(items, analyzer=analyzer, max_results=5)
+        self.assertEqual(result.analyzed_count, 50)
+        self.assertEqual(result.candidate_count, 22)
+        self.assertEqual(
+            [candidate.photo.path.name for candidate in result.candidates],
+            [f"item-{index:03d}.jpg" for index in range(5)],
+        )
+
+    def test_sized_input_is_streamed_instead_of_eagerly_copied(self):
+        stream = CountingSizedPhotos(photo(f"stream-{index}.jpg") for index in range(100))
+        cancel = Event()
+
+        def analyzer(item):
+            cancel.set()
+            return quality(item, overall=90, sharpness=90, exposure=90)
+
+        result = find_bad_shot_candidates(stream, analyzer=analyzer, cancel_event=cancel)
+        self.assertTrue(result.cancelled)
+        self.assertEqual(result.analyzed_count, 1)
+        # A for-loop may request the next item before observing cancellation,
+        # but it must not pre-consume the whole sized collection.
+        self.assertLessEqual(stream.iterated, 2)
+
+    def test_unsized_iterable_preserves_progress_total(self):
+        items = [photo(f"generator-{index}.jpg") for index in range(12)]
+        progress = []
+        result = find_bad_shot_candidates(
+            (item for item in items),
+            analyzer=lambda item: quality(item, overall=90, sharpness=90, exposure=90),
+            progress=lambda current, total: progress.append((current, total)),
+        )
+        self.assertEqual(result.analyzed_count, 12)
+        self.assertEqual(progress, [(10, 12), (12, 12)])
 
     def test_unavailable_evidence_is_counted_but_not_flagged(self):
         item = photo("missing.jpg")
