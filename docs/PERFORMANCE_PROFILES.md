@@ -36,6 +36,18 @@ python tools/benchmark_similarity_index.py --count 50000 --collision-every 20
 
 The benchmark uses synthetic `Photo` records only and never scans personal files or performs cleanup. It reports build throughput, traced Python peak memory and sampled query time; there is intentionally no universal pass/fail memory threshold because Python/runtime versions and machine characteristics differ.
 
+## Photo-record memory behavior
+
+Every successful image kept in a scan result is represented by a `Photo` record. These records now use dataclass slots, removing the per-instance dynamic attribute dictionary while keeping the same immutable fields, equality behavior and pickling compatibility. This reduces steady Python object overhead for large libraries without changing SHA-256 evidence, visual signatures, paths, cleanup revalidation or session semantics.
+
+A deterministic synthetic benchmark compares the current record layout with the former dictionary-backed dataclass layout:
+
+```powershell
+python tools/benchmark_photo_records.py --count 100000
+```
+
+The benchmark shares payload values where practical so the reported difference focuses on record-container overhead. Results are intended for before/after comparisons on the same Python runtime rather than as a universal pass/fail threshold.
+
 ## Safety and determinism
 
 - A profile is captured when a scan starts; changing the menu while a scan is running affects only the next scan.

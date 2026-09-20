@@ -48,7 +48,7 @@ class ScanIssue:
     path: Path | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Photo:
     path: Path
     size: int
