@@ -1,160 +1,104 @@
-import hashlib
 import json
-import os
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
-
-from photoclean.diagnostics import (
-    COPY_NAME,
-    MANIFEST_NAME,
-    ORIGINAL_NAME,
-    RecycleVerificationError,
-    create_recycle_verification,
-    export_recycle_evidence,
-    inspect_recycle_evidence,
-    load_recycle_verification,
-    move_generated_copy_to_recycle,
-    verify_restored_copy,
+from photoclean.recycle_evidence import (
+    EvidenceError,
+    cli_main,
+    prepare_restore_evidence,
+    verify_restore_evidence,
 )
 
 
-class RecycleEvidenceTests(unittest.TestCase):
-    def test_new_manifest_has_uuid_event_log_and_fingerprint(self):
-        with tempfile.TemporaryDirectory() as folder:
-            check = create_recycle_verification(folder)
-            payload = json.loads(check.manifest.read_text(encoding="utf-8"))
+class RecycleRestoreEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.fake_bin = self.root / "fake-bin"
+        self.fake_bin.mkdir()
 
-            self.assertEqual(payload["version"], 2)
-            self.assertEqual(payload["stage"], "prepared")
-            self.assertEqual([event["stage"] for event in payload["events"]], ["prepared"])
-            self.assertEqual(len(payload["session_id"]), 32)
-            self.assertGreater(payload["file_size"], 0)
-            self.assertEqual(len(payload["manifest_fingerprint"]), 64)
+    def tearDown(self):
+        self.tmp.cleanup()
 
-            inspection = inspect_recycle_evidence(check)
-            self.assertTrue(inspection.valid)
-            self.assertEqual(inspection.stage, "prepared")
-            self.assertEqual(inspection.event_count, 1)
-            self.assertTrue(inspection.original_matches)
-            self.assertTrue(inspection.copy_matches)
+    def fake_recycle(self, path: str):
+        source = Path(path)
+        source.replace(self.fake_bin / source.name)
 
-    def test_manifest_tampering_is_rejected(self):
-        with tempfile.TemporaryDirectory() as folder:
-            check = create_recycle_verification(folder)
-            payload = json.loads(check.manifest.read_text(encoding="utf-8"))
-            payload["file_size"] += 1
-            check.manifest.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+    def test_prepare_then_manual_restore_verifies_both_generated_copies(self):
+        evidence = prepare_restore_evidence(
+            self.root / "workspace",
+            recycle=self.fake_recycle,
+            now=lambda: "2026-09-20T12:00:00Z",
+            payload_factory=lambda: b"generated-evidence-payload",
+        )
+        record = json.loads(evidence.read_text(encoding="utf-8"))
+        original = Path(record["original_path"])
+        copy = Path(record["copy_path"])
+        recycled = self.fake_bin / copy.name
+        self.assertEqual(record["phase"], "awaiting_restore")
+        self.assertTrue(record["recycle_move_confirmed"])
+        self.assertTrue(original.exists())
+        self.assertFalse(copy.exists())
+        self.assertTrue(recycled.exists())
+
+        recycled.replace(copy)  # simulate the user's explicit Recycle Bin restore
+        verified = verify_restore_evidence(
+            evidence,
+            now=lambda: "2026-09-20T12:01:00Z",
+        )
+        self.assertEqual(verified["phase"], "verified")
+        self.assertTrue(verified["restore_verified"])
+        self.assertTrue(original.exists())
+        self.assertTrue(copy.exists())
+        self.assertEqual(original.read_bytes(), copy.read_bytes())
+
+    def test_failed_recycle_keeps_generated_pair_and_records_failure(self):
+        def fail(_path: str):
+            raise OSError("Recycle Bin unavailable")
+
+        with self.assertRaises(EvidenceError):
+            prepare_restore_evidence(
+                self.root / "workspace",
+                recycle=fail,
+                payload_factory=lambda: b"generated-evidence-payload",
             )
+        evidence_files = list((self.root / "workspace").glob("*evidence*.json"))
+        self.assertEqual(len(evidence_files), 1)
+        record = json.loads(evidence_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(record["phase"], "recycle_failed")
+        self.assertTrue(Path(record["original_path"]).exists())
+        self.assertTrue(Path(record["copy_path"]).exists())
+        self.assertFalse(record["recycle_move_confirmed"])
 
-            with self.assertRaises(RecycleVerificationError):
-                load_recycle_verification(check.manifest)
+    def test_verify_rejects_modified_original(self):
+        evidence = prepare_restore_evidence(
+            self.root / "workspace",
+            recycle=self.fake_recycle,
+            payload_factory=lambda: b"generated-evidence-payload",
+        )
+        record = json.loads(evidence.read_text(encoding="utf-8"))
+        copy = Path(record["copy_path"])
+        (self.fake_bin / copy.name).replace(copy)
+        Path(record["original_path"]).write_bytes(b"changed")
+        with self.assertRaises(EvidenceError):
+            verify_restore_evidence(evidence)
+        unchanged = json.loads(evidence.read_text(encoding="utf-8"))
+        self.assertEqual(unchanged["phase"], "awaiting_restore")
+        self.assertFalse(unchanged["restore_verified"])
 
-    def test_fake_recycle_restore_and_export_produce_consistent_evidence(self):
-        with tempfile.TemporaryDirectory() as folder:
-            check = create_recycle_verification(folder)
+    def test_verify_requires_restored_copy(self):
+        evidence = prepare_restore_evidence(
+            self.root / "workspace",
+            recycle=self.fake_recycle,
+            payload_factory=lambda: b"generated-evidence-payload",
+        )
+        with self.assertRaises(EvidenceError):
+            verify_restore_evidence(evidence)
 
-            def fake_recycler(path):
-                Path(path).unlink()
-
-            recycled = move_generated_copy_to_recycle(check, recycler=fake_recycler)
-            recycled_inspection = inspect_recycle_evidence(recycled)
-            self.assertTrue(recycled_inspection.valid)
-            self.assertEqual(recycled_inspection.stage, "recycled")
-            self.assertEqual(recycled_inspection.event_count, 2)
-            self.assertFalse(recycled_inspection.copy_present)
-
-            shutil.copy2(recycled.original, recycled.copy)
-            verified = verify_restored_copy(recycled)
-            inspection = inspect_recycle_evidence(verified)
-            self.assertTrue(inspection.valid)
-            self.assertEqual(inspection.stage, "restored-verified")
-            self.assertEqual(inspection.event_count, 3)
-            self.assertTrue(inspection.copy_matches)
-
-            destination = Path(folder) / "evidence-report.json"
-            exported = export_recycle_evidence(verified, destination)
-            report = json.loads(exported.read_text(encoding="utf-8"))
-            self.assertFalse(report["acceptance_gate_closed"])
-            self.assertTrue(report["inspection"]["valid"])
-            self.assertEqual(report["inspection"]["stage"], "restored-verified")
-            self.assertEqual(
-                [event["stage"] for event in report["manifest"]["events"]],
-                ["prepared", "recycled", "restored-verified"],
-            )
-
-    def test_hardlink_cannot_fake_manual_restore(self):
-        with tempfile.TemporaryDirectory() as folder:
-            check = create_recycle_verification(folder)
-
-            def fake_recycler(path):
-                Path(path).unlink()
-
-            recycled = move_generated_copy_to_recycle(check, recycler=fake_recycler)
-            try:
-                os.link(recycled.original, recycled.copy)
-            except (OSError, NotImplementedError) as error:
-                self.skipTest(f"hardlinks unavailable: {error}")
-
-            with self.assertRaises(RecycleVerificationError):
-                verify_restored_copy(recycled)
-
-    def test_invalid_recycled_state_cannot_be_exported(self):
-        with tempfile.TemporaryDirectory() as folder:
-            check = create_recycle_verification(folder)
-
-            def fake_recycler(path):
-                Path(path).unlink()
-
-            recycled = move_generated_copy_to_recycle(check, recycler=fake_recycler)
-            Image.new("RGB", (96, 64), "red").save(recycled.copy, format="PNG")
-
-            inspection = inspect_recycle_evidence(recycled)
-            self.assertFalse(inspection.valid)
-            self.assertIn("expected to be absent", " ".join(inspection.problems))
-            with self.assertRaises(RecycleVerificationError):
-                export_recycle_evidence(recycled, Path(folder) / "invalid-report.json")
-
-    def test_legacy_v1_prepared_manifest_upgrades_on_transition(self):
-        with tempfile.TemporaryDirectory() as folder:
-            base = Path(folder)
-            original = base / ORIGINAL_NAME
-            copy = base / COPY_NAME
-            Image.new("RGB", (32, 24), "navy").save(original, format="PNG")
-            shutil.copy2(original, copy)
-            digest = hashlib.sha256(original.read_bytes()).hexdigest()
-            manifest = base / MANIFEST_NAME
-            manifest.write_text(
-                json.dumps(
-                    {
-                        "version": 1,
-                        "stage": "prepared",
-                        "digest_sha256": digest,
-                        "original_file": ORIGINAL_NAME,
-                        "copy_file": COPY_NAME,
-                        "created_at_utc": "2026-09-19T00:00:00+00:00",
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-            loaded = load_recycle_verification(manifest)
-            self.assertEqual(loaded.manifest_version, 1)
-
-            def fake_recycler(path):
-                Path(path).unlink()
-
-            recycled = move_generated_copy_to_recycle(loaded, recycler=fake_recycler)
-            self.assertEqual(recycled.manifest_version, 2)
-            self.assertEqual(recycled.stage, "recycled")
-            payload = json.loads(manifest.read_text(encoding="utf-8"))
-            self.assertEqual(payload["upgraded_from_version"], 1)
-            self.assertEqual([event["stage"] for event in payload["events"]], ["prepared", "recycled"])
+    def test_cli_rejects_bad_arity_without_side_effects(self):
+        self.assertEqual(cli_main(["--recycle-restore-verify"]), 2)
+        self.assertEqual(cli_main(["--recycle-restore-prepare", "a", "b"]), 2)
 
 
 if __name__ == "__main__":
