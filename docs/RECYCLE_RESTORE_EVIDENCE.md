@@ -56,6 +56,12 @@ Successful verification requires:
 
 The command then records stage `restored-verified` and writes `recycle-evidence-report.json` beside the manifest. That report deliberately contains `acceptance_gate_closed: false`; repository status changes still require review of real Windows evidence.
 
+### Interrupted report export is recoverable
+
+The `restored-verified` manifest transition is deliberately durable. If verification proves the restore but writing `recycle-evidence-report.json` then fails because of a temporary disk or permission problem, **do not repeat the move/restore cycle** and do not edit the manifest. Run the same `--recycle-restore-verify` command again after fixing the write problem.
+
+The retry performs a fresh read-only validation of the manifest plus both generated files, recreates the report, and does not append a duplicate `restored-verified` event. A changed/missing file or tampered manifest is still rejected. This makes release evidence recovery deterministic without weakening the physical restore requirement.
+
 ## From source
 
 The same workflow is available through Python 3.12:
