@@ -14,6 +14,7 @@ from .diagnostics import (
     RecycleVerificationError,
     create_recycle_verification,
     export_recycle_evidence,
+    inspect_recycle_evidence,
     load_recycle_verification,
     move_generated_copy_to_recycle,
     verify_restored_copy,
@@ -30,15 +31,32 @@ def default_workspace() -> Path:
     return base / WORKSPACE_NAME
 
 
+def create_restore_evidence(
+    workspace: str | Path | None = None,
+) -> RecycleVerification:
+    """Create a fresh generated verification fixture without moving any file yet."""
+    base = Path(workspace).expanduser().resolve() if workspace is not None else default_workspace()
+    base.mkdir(parents=True, exist_ok=True)
+    return create_recycle_verification(base)
+
+
+def move_restore_evidence(
+    manifest: str | Path,
+    *,
+    recycler: Callable[[str], object] | None = None,
+) -> RecycleVerification:
+    """Retry or perform the guarded Recycle Bin move for an existing prepared fixture."""
+    check = load_recycle_verification(Path(manifest).expanduser().resolve())
+    return move_generated_copy_to_recycle(check, recycler=recycler)
+
+
 def prepare_restore_evidence(
     workspace: str | Path | None = None,
     *,
     recycler: Callable[[str], object] | None = None,
 ) -> RecycleVerification:
     """Create generated fixtures and move only RECYCLE-ME.png to Recycle Bin."""
-    base = Path(workspace).expanduser().resolve() if workspace is not None else default_workspace()
-    base.mkdir(parents=True, exist_ok=True)
-    check = create_recycle_verification(base)
+    check = create_restore_evidence(workspace)
     return move_generated_copy_to_recycle(check, recycler=recycler)
 
 
@@ -78,6 +96,55 @@ def verify_restore_evidence(
     return verified, report
 
 
+def _print_move_success(check: RecycleVerification) -> None:
+    print(f"MOVE_CONFIRMED manifest={check.manifest}")
+    print(f"ORIGINAL_PRESERVED path={check.original}")
+    print(f"RESTORE_REQUIRED path={check.copy}")
+    print(
+        "Restore RECYCLE-ME.png from Windows Recycle Bin, then run: "
+        f"SwirPhotoClean.exe --recycle-restore-verify \"{check.manifest}\""
+    )
+
+
+def _print_status(manifest: str | Path) -> int:
+    manifest_path = Path(manifest).expanduser().resolve()
+    inspection = inspect_recycle_evidence(manifest_path)
+    if not inspection.valid:
+        raise RecycleVerificationError(
+            "Recycle verification evidence is inconsistent: "
+            + "; ".join(inspection.problems)
+        )
+
+    print(
+        f"EVIDENCE_VALID stage={inspection.stage} "
+        f"session={inspection.session_id or 'legacy'}"
+    )
+    print(f"ORIGINAL_PRESENT={'yes' if inspection.original_present else 'no'}")
+    print(f"COPY_PRESENT={'yes' if inspection.copy_present else 'no'}")
+
+    if inspection.stage == "prepared":
+        print(
+            "NEXT=Run the guarded move without recreating the fixture: "
+            f"SwirPhotoClean.exe --recycle-restore-move \"{manifest_path}\""
+        )
+    elif inspection.stage == "recycled":
+        print(
+            "NEXT=Restore RECYCLE-ME.png from Windows Recycle Bin, then run: "
+            f"SwirPhotoClean.exe --recycle-restore-verify \"{manifest_path}\""
+        )
+    else:
+        report = manifest_path.parent / REPORT_NAME
+        print(f"REPORT_PRESENT={'yes' if report.is_file() else 'no'} path={report}")
+        if report.is_file():
+            print("READY_FOR_REVIEW")
+        else:
+            print(
+                "NEXT=Re-run --recycle-restore-verify to recreate the evidence report; "
+                "the physical restore does not need to be repeated."
+            )
+    return 0
+
+
 def cli_main(argv: tuple[str, ...] | list[str]) -> int:
     args = list(argv)
     if not args:
@@ -91,15 +158,35 @@ def cli_main(argv: tuple[str, ...] | list[str]) -> int:
                 raise RecycleVerificationError(
                     "prepare accepts at most one optional workspace path"
                 )
-            check = prepare_restore_evidence(args[0] if args else None)
-            print(f"MOVE_CONFIRMED manifest={check.manifest}")
-            print(f"ORIGINAL_PRESERVED path={check.original}")
-            print(f"RESTORE_REQUIRED path={check.copy}")
-            print(
-                "Restore RECYCLE-ME.png from Windows Recycle Bin, then run: "
-                f"SwirPhotoClean.exe --recycle-restore-verify \"{check.manifest}\""
-            )
+            prepared = create_restore_evidence(args[0] if args else None)
+            try:
+                moved = move_restore_evidence(prepared.manifest)
+            except (RecycleVerificationError, OSError):
+                print("MOVE_NOT_CONFIRMED")
+                print(f"PREPARED_MANIFEST path={prepared.manifest}")
+                print(
+                    "RETRY_COMMAND=SwirPhotoClean.exe --recycle-restore-move "
+                    f"\"{prepared.manifest}\""
+                )
+                raise
+            _print_move_success(moved)
             return 0
+
+        if command == "--recycle-restore-move":
+            if len(args) != 1:
+                raise RecycleVerificationError(
+                    "move requires exactly one prepared recycle-verification.json path"
+                )
+            moved = move_restore_evidence(args[0])
+            _print_move_success(moved)
+            return 0
+
+        if command == "--recycle-restore-status":
+            if len(args) != 1:
+                raise RecycleVerificationError(
+                    "status requires exactly one recycle-verification.json path"
+                )
+            return _print_status(args[0])
 
         if command == "--recycle-restore-verify":
             if len(args) != 1:
