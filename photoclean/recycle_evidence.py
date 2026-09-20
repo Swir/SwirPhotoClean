@@ -47,9 +47,28 @@ def verify_restore_evidence(
     *,
     report_path: str | Path | None = None,
 ) -> tuple[RecycleVerification, Path]:
-    """Verify a manual Windows restore and export the existing evidence report."""
+    """Verify a manual Windows restore and export the existing evidence report.
+
+    Export is intentionally resumable. The manifest transition to
+    ``restored-verified`` is durable and can happen before report creation. If a
+    disk/permission interruption prevents the report from being written, running
+    the verify command again revalidates the already-verified fixture and exports
+    the report without adding another stage event.
+    """
     check = load_recycle_verification(Path(manifest).expanduser().resolve())
-    verified = verify_restored_copy(check)
+    if check.stage == "recycled":
+        verified = verify_restored_copy(check)
+    elif check.stage == "restored-verified":
+        # A previous verification may have completed the tamper-evident state
+        # transition but failed while writing the convenience report. Exporting
+        # again is safe because export_recycle_evidence performs a fresh,
+        # read-only inspection of both generated files and the manifest.
+        verified = check
+    else:
+        raise RecycleVerificationError(
+            "Recycle restore evidence must be in recycled or restored-verified stage"
+        )
+
     destination = (
         Path(report_path).expanduser().resolve()
         if report_path is not None
