@@ -222,36 +222,60 @@ def read_photo(
     return Photo(path, *signature(after), digest, width, height, bits, color)
 
 
+@dataclass(slots=True)
+class _BKNode:
+    """Compact BK-tree node with lazily allocated collision/child containers."""
+
+    value: int
+    photo: Photo
+    collisions: list[Photo] | None = None
+    children: dict[int, "_BKNode"] | None = None
+
+
 class BKTree:
-    """Hamming-distance index; identical hashes are stored in one bucket."""
+    """Hamming-distance index optimized for mostly unique perceptual hashes."""
+
     def __init__(self):
-        self.root = None
+        self.root: _BKNode | None = None
 
     def add(self, value, photo):
         if self.root is None:
-            self.root = [value, [photo], {}]
+            self.root = _BKNode(value=value, photo=photo)
             return
         node = self.root
         while True:
-            distance = (node[0] ^ value).bit_count()
+            distance = (node.value ^ value).bit_count()
             if distance == 0:
-                node[1].append(photo)
+                if node.collisions is None:
+                    node.collisions = [photo]
+                else:
+                    node.collisions.append(photo)
                 return
-            if distance not in node[2]:
-                node[2][distance] = [value, [photo], {}]
+            if node.children is None:
+                node.children = {distance: _BKNode(value=value, photo=photo)}
                 return
-            node = node[2][distance]
+            child = node.children.get(distance)
+            if child is None:
+                node.children[distance] = _BKNode(value=value, photo=photo)
+                return
+            node = child
 
     def query(self, value, radius, cancel):
         stack = [self.root] if self.root else []
         while stack:
             checkpoint(cancel)
             node = stack.pop()
-            distance = (node[0] ^ value).bit_count()
+            distance = (node.value ^ value).bit_count()
             if distance <= radius:
-                yield from node[1]
-            stack.extend(child for edge, child in node[2].items()
-                         if distance - radius <= edge <= distance + radius)
+                yield node.photo
+                if node.collisions:
+                    yield from node.collisions
+            if node.children:
+                stack.extend(
+                    child
+                    for edge, child in node.children.items()
+                    if distance - radius <= edge <= distance + radius
+                )
 
 
 def similar(a: Photo, b: Photo, threshold: int) -> bool:
@@ -386,7 +410,9 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
         if include_similar:
             # Each group has a fixed anchor. We never chain A~B~C into A~C.
             tree = BKTree()
-            buckets = {}
+            # Allocate member lists only for anchors that actually gain a match;
+            # mostly-unique libraries therefore avoid one dict/list pair per photo.
+            similar_members: dict[Path, list[Photo]] = {}
             unique_count = len(representatives)
             for index, photo in enumerate(representatives.values()):
                 checkpoint(cancel)
@@ -396,20 +422,22 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                                if similar(candidate, photo, threshold)), None)
                 if anchor is None:
                     tree.add(photo.dhash, photo)
-                    buckets[photo.path] = [photo]
                 else:
-                    buckets[anchor.path].append(photo)
-            for representatives_in_group in buckets.values():
+                    members = similar_members.get(anchor.path)
+                    if members is None:
+                        similar_members[anchor.path] = [anchor, photo]
+                    else:
+                        members.append(photo)
+            for representatives_in_group in similar_members.values():
                 checkpoint(cancel)
-                if len(representatives_in_group) > 1:
-                    expanded = []
-                    for representative in representatives_in_group:
-                        members = duplicate_members.get(representative.digest)
-                        if members is None:
-                            expanded.append(representative)
-                        else:
-                            expanded.extend(members)
-                    result.groups.append(Group("similar", tuple(expanded)))
+                expanded = []
+                for representative in representatives_in_group:
+                    members = duplicate_members.get(representative.digest)
+                    if members is None:
+                        expanded.append(representative)
+                    else:
+                        expanded.extend(members)
+                result.groups.append(Group("similar", tuple(expanded)))
         return result
     except Cancelled:
         result.cancelled = True
