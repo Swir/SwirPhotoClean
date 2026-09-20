@@ -11,7 +11,6 @@ import stat
 import threading
 import time
 import warnings
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -169,33 +168,54 @@ def _analysis_rgb(image: Image.Image) -> Image.Image:
     return oriented.convert("RGB")
 
 
-def read_photo(path: Path, cancel: threading.Event, performance_profile: str | PerformanceProfile | None = None) -> Photo:
+def read_photo(
+    path: Path,
+    cancel: threading.Event,
+    performance_profile: str | PerformanceProfile | None = None,
+    analysis_cache: dict[str, Photo] | None = None,
+) -> Photo:
+    """Read one photo, reusing pixel analysis only for verified exact SHA-256 copies.
+
+    The file is always fully hashed first and its filesystem signature is still
+    revalidated afterwards. When a previous successfully decoded photo has the
+    same full SHA-256 digest, dimensions/dHash/color analysis can be reused because
+    the scanner already treats that digest as exact-duplicate evidence. This avoids
+    repeatedly decoding identical large images without weakening cleanup safety.
+    """
+
     profile = get_performance_profile(performance_profile)
     checkpoint(cancel)
     before = path.stat()
     digest = sha256(path, cancel, profile)
     checkpoint(cancel)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", Image.DecompressionBombWarning)
-        with Image.open(path) as source:
-            checkpoint(cancel)
-            if source.width * source.height > MAX_PIXELS:
-                raise ScanIssueError("pixel_limit", tr('obraz przekracza limit 40 megapikseli'))
-            if getattr(source, "n_frames", 1) > 1:
-                raise ScanIssueError("multi_frame", tr('obraz animowany lub wielostronicowy — pominięty'))
-            rgb = _analysis_rgb(source)
-            checkpoint(cancel)
-            width, height = rgb.size
-            gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
-            checkpoint(cancel)
-            bits = 0
-            for y in range(8):
-                for x in range(8):
-                    bits = (bits << 1) | (gray[y * 9 + x] > gray[y * 9 + x + 1])
-            # Low-resolution RGB signature prevents flat, different-color images
-            # with identical gradient hashes from becoming false matches.
-            color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
-            checkpoint(cancel)
+
+    cached = analysis_cache.get(digest) if analysis_cache is not None else None
+    if cached is not None:
+        width, height, bits, color = cached.width, cached.height, cached.dhash, cached.color
+        checkpoint(cancel)
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(path) as source:
+                checkpoint(cancel)
+                if source.width * source.height > MAX_PIXELS:
+                    raise ScanIssueError("pixel_limit", tr('obraz przekracza limit 40 megapikseli'))
+                if getattr(source, "n_frames", 1) > 1:
+                    raise ScanIssueError("multi_frame", tr('obraz animowany lub wielostronicowy — pominięty'))
+                rgb = _analysis_rgb(source)
+                checkpoint(cancel)
+                width, height = rgb.size
+                gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
+                checkpoint(cancel)
+                bits = 0
+                for y in range(8):
+                    for x in range(8):
+                        bits = (bits << 1) | (gray[y * 9 + x] > gray[y * 9 + x + 1])
+                # Low-resolution RGB signature prevents flat, different-color images
+                # with identical gradient hashes from becoming false matches.
+                color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
+                checkpoint(cancel)
+
     after = path.stat()
     if signature(before) != signature(after):
         raise ScanIssueError("changed_during_scan", tr('plik zmienił się podczas skanowania'))
@@ -250,6 +270,11 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
     profile = get_performance_profile(performance_profile)
     result = ScanResult()
     seen_paths, seen_inodes = set(), set()
+    # One representative per exact SHA-256 digest doubles as the safe pixel-analysis
+    # cache. Only duplicate digests allocate a members list, avoiding one list object
+    # per unique photo on large libraries.
+    representatives: dict[str, Photo] = {}
+    duplicate_members: dict[str, list[Photo]] = {}
     if not 0 <= threshold <= 16:
         raise ValueError(tr('Próg podobieństwa musi mieścić się w zakresie 0–16.'))
     try:
@@ -327,8 +352,17 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                                 path,
                             )
                             continue
-                        photo = read_photo(path, cancel, profile)
+                        photo = read_photo(path, cancel, profile, representatives)
                         seen_inodes.add(inode)
+                        representative = representatives.get(photo.digest)
+                        if representative is None:
+                            representatives[photo.digest] = photo
+                        else:
+                            members = duplicate_members.get(photo.digest)
+                            if members is None:
+                                duplicate_members[photo.digest] = [representative, photo]
+                            else:
+                                members.append(photo)
                         result.photos.append(photo)
                         progress(tr('Odczytano {v0} zdjęć • {v1}', v0=len(result.photos), v1=name))
                     except Cancelled:
@@ -341,19 +375,22 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                         record_scan_issue(result, "pixel_limit", f"{path}: {error}", path)
                     except (OSError, ValueError) as error:
                         record_scan_issue(result, "image_read_error", f"{path}: {error}", path)
-        exact = defaultdict(list)
-        for photo in result.photos:
-            checkpoint(cancel)
-            exact[photo.digest].append(photo)
-        result.groups = [Group("exact", tuple(items)) for items in exact.values() if len(items) > 1]
+
+        # Preserve exact-group order by first digest appearance while allocating
+        # member lists only for actual duplicates.
+        result.groups = [
+            Group("exact", tuple(duplicate_members[digest]))
+            for digest in representatives
+            if digest in duplicate_members
+        ]
         if include_similar:
             # Each group has a fixed anchor. We never chain A~B~C into A~C.
             tree = BKTree()
             buckets = {}
-            for index, items in enumerate(exact.values()):
+            unique_count = len(representatives)
+            for index, photo in enumerate(representatives.values()):
                 checkpoint(cancel)
-                photo = items[0]
-                progress(tr('Porównywanie zdjęć • {v0}/{v1}', v0=index + 1, v1=len(exact)))
+                progress(tr('Porównywanie zdjęć • {v0}/{v1}', v0=index + 1, v1=unique_count))
                 checkpoint(cancel)
                 anchor = next((candidate for candidate in tree.query(photo.dhash, threshold, cancel)
                                if similar(candidate, photo, threshold)), None)
@@ -362,10 +399,17 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                     buckets[photo.path] = [photo]
                 else:
                     buckets[anchor.path].append(photo)
-            for representatives in buckets.values():
+            for representatives_in_group in buckets.values():
                 checkpoint(cancel)
-                if len(representatives) > 1:
-                    result.groups.append(Group("similar", tuple(p for rep in representatives for p in exact[rep.digest])))
+                if len(representatives_in_group) > 1:
+                    expanded = []
+                    for representative in representatives_in_group:
+                        members = duplicate_members.get(representative.digest)
+                        if members is None:
+                            expanded.append(representative)
+                        else:
+                            expanded.extend(members)
+                    result.groups.append(Group("similar", tuple(expanded)))
         return result
     except Cancelled:
         result.cancelled = True
