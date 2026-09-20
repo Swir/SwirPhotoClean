@@ -102,6 +102,8 @@ def run(destination, settings_path=None):
             assert app.review_sort_mode == "recommended"
             assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.compare_insights_gui"
             assert hasattr(app, "open_folder_health")
+            assert hasattr(app, "safe_mode")
+            assert not app.safe_mode.get()
             assert root.bind("<Control-f>")
             assert root.bind("<Control-h>")
             app.result = eco
@@ -115,6 +117,24 @@ def run(destination, settings_path=None):
             assert app.folder_health_view is not None
             assert app.folder_health_view.health.exact_duplicate_files == 1
             assert not app.marked
+
+            # Final-stack Safe Mode must preserve planning marks while blocking
+            # the cleanup action. This exercises the actual packaged app class,
+            # not the older standalone Safe Mode layer.
+            app.marked = {eco.photos[0].path}
+            app.update_summary()
+            assert str(app.trash_button["state"]) == "normal"
+            app.safe_mode.set(True)
+            app._safe_mode_changed()
+            assert app.marked == {eco.photos[0].path}
+            assert str(app.trash_button["state"]) == "disabled"
+            app.safe_mode.set(False)
+            app._safe_mode_changed()
+            assert app.marked == {eco.photos[0].path}
+            assert str(app.trash_button["state"]) == "normal"
+            app.marked.clear()
+            app.update_summary()
+
             app.performance_profile.set("fast")
             app._performance_changed()
             root.update_idletasks()
@@ -130,6 +150,8 @@ def run(destination, settings_path=None):
             assert hasattr(app, "performance_menu")
             assert hasattr(app, "review_filter_entry")
             assert hasattr(app, "open_folder_health")
+            assert hasattr(app, "safe_mode")
+            assert not app.safe_mode.get()
             assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.compare_insights_gui"
             assert root.bind("<Control-h>")
             root.after_cancel(app.poll_id)
@@ -150,6 +172,9 @@ def run(destination, settings_path=None):
             folder_health_center_available=True,
             folder_health_exact_savings_conservative=True,
             folder_health_non_destructive=True,
+            safe_mode_final_stack_available=True,
+            safe_mode_preserves_marks=True,
+            safe_mode_blocks_cleanup_button=True,
             portable_mode_exercised=portable_mode_exercised,
             portable_settings_local=portable_settings_local,
             portable_data_dir_writable=portable_data_dir_writable,

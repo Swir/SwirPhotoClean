@@ -2,6 +2,7 @@ import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from photoclean import i18n
 from photoclean.core import Group, Photo, ScanResult
@@ -106,6 +107,42 @@ class FolderHealthGuiTests(unittest.TestCase):
             root.update_idletasks()
             self.assertIs(app.folder_health_view, first_window)
             self.assertEqual(app.marked, before)
+        finally:
+            root.after_cancel(app.poll_id)
+            root.destroy()
+
+    def test_final_app_safe_mode_blocks_cleanup_without_losing_marks(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = PhotoCleanApp(root, self.settings_path)
+        try:
+            app.result = self._result()
+            app.marked = {Path("library/b.png")}
+            app.update_summary()
+            self.assertFalse(app.safe_mode.get())
+            self.assertEqual(str(app.trash_button["state"]), "normal")
+
+            app.safe_mode.set(True)
+            app._safe_mode_changed()
+
+            self.assertEqual(app.marked, {Path("library/b.png")})
+            self.assertEqual(str(app.mark_button["state"]), "normal")
+            self.assertEqual(str(app.trash_button["state"]), "disabled")
+            self.assertIn("Tryb bezpieczny WŁĄCZONY", app.status.get())
+
+            with patch("photoclean.folder_health_app.messagebox.showinfo") as info, patch(
+                "photoclean.cleanup_history_gui.recycle_selected"
+            ) as recycle_selected:
+                app.confirm_recycle()
+
+            info.assert_called_once()
+            recycle_selected.assert_not_called()
+            self.assertEqual(app.marked, {Path("library/b.png")})
+
+            app.safe_mode.set(False)
+            app._safe_mode_changed()
+            self.assertEqual(str(app.trash_button["state"]), "normal")
+            self.assertEqual(app.marked, {Path("library/b.png")})
         finally:
             root.after_cancel(app.poll_id)
             root.destroy()
