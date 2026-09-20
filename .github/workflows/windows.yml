@@ -34,6 +34,18 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed' }
           $report = Get-Content $reportPath -Raw | ConvertFrom-Json
           if (-not $report.ok) { throw 'Packaged smoke test failed' }
+      - name: Smoke-test packaged Portable Mode
+        shell: pwsh
+        run: |
+          $reportPath = Join-Path $PWD 'packaged-portable-smoke.json'
+          $process = Start-Process -FilePath dist/SwirPhotoClean/SwirPhotoClean.exe -ArgumentList '--portable', '--self-test', $reportPath -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Packaged Portable Mode timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Packaged Portable Mode failed' }
+          $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+          if (-not $report.ok) { throw 'Packaged Portable Mode smoke test failed' }
+          if (-not $report.portable_mode_exercised) { throw 'Portable Mode was not exercised' }
+          if (-not $report.portable_settings_local) { throw 'Portable settings path is not local to the package data directory' }
+          if (-not $report.portable_data_dir_writable) { throw 'Portable data directory was not writable in the packaged smoke test' }
       - uses: actions/upload-artifact@v4
         with:
           name: SwirPhotoClean-windows-portable

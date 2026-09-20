@@ -52,7 +52,7 @@ class PhotoCleanApp(ReviewPhotoCleanApp):
         self.folder_health_view = FolderHealthWindow(self.root, self.result)
 
 
-def main():
+def main(settings_path=None):
     if os.name == "nt":
         import ctypes
 
@@ -61,5 +61,5 @@ def main():
         except (AttributeError, OSError):
             pass
     root = tk.Tk()
-    PhotoCleanApp(root)
+    PhotoCleanApp(root, settings_path=settings_path)
     root.mainloop()
