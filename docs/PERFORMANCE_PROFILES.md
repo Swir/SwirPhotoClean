@@ -16,6 +16,26 @@ The scanner avoids unnecessary full-resolution intermediate image buffers on the
 
 This optimization changes allocation behavior only. The resulting oriented dimensions, dHash, low-resolution color signature and full-file SHA-256 remain governed by the same rules, and regression tests cover the opaque fast path, transparent white matte and rotated EXIF path.
 
+## Similarity-index memory behavior
+
+The similar-photo BK-tree now uses slot-based nodes and allocates collision buckets and child dictionaries only when a node actually needs them. The review grouping phase also allocates a members list only after an anchor receives its first real similar-photo match. A mostly unique library therefore no longer pays for one collision list, one empty child dictionary and one singleton review bucket per perceptual-hash anchor.
+
+This is a container-layout optimization only: dHash radius checks, color/aspect verification, fixed-anchor grouping, exact SHA-256 expansion and cancellation semantics are unchanged. Regression tests exercise unique hashes, identical-hash collisions and radius queries.
+
+A deterministic in-memory benchmark is available for comparing similarity-index revisions on the same machine:
+
+```powershell
+python tools/benchmark_similarity_index.py --count 50000
+```
+
+To stress dHash collisions as well:
+
+```powershell
+python tools/benchmark_similarity_index.py --count 50000 --collision-every 20
+```
+
+The benchmark uses synthetic `Photo` records only and never scans personal files or performs cleanup. It reports build throughput, traced Python peak memory and sampled query time; there is intentionally no universal pass/fail memory threshold because Python/runtime versions and machine characteristics differ.
+
 ## Safety and determinism
 
 - A profile is captured when a scan starts; changing the menu while a scan is running affects only the next scan.
