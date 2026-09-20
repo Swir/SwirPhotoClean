@@ -29,6 +29,14 @@ if __name__ == "__main__":
 
         raise SystemExit(run(runtime.argv[1], settings_path=runtime.settings_path))
 
+    if runtime.argv and runtime.argv[0] in {
+        "--recycle-restore-prepare",
+        "--recycle-restore-verify",
+    }:
+        from photoclean.recycle_evidence import cli_main
+
+        raise SystemExit(cli_main(runtime.argv))
+
     from photoclean.folder_health_app import main
 
     main(settings_path=runtime.settings_path)

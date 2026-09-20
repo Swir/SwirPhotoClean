@@ -46,6 +46,12 @@ jobs:
           if (-not $report.portable_mode_exercised) { throw 'Portable Mode was not exercised' }
           if (-not $report.portable_settings_local) { throw 'Portable settings path is not local to the package data directory' }
           if (-not $report.portable_data_dir_writable) { throw 'Portable data directory was not writable in the packaged smoke test' }
+      - name: Smoke-test packaged Recycle restore command dispatch
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath dist/SwirPhotoClean/SwirPhotoClean.exe -ArgumentList '--recycle-restore-verify' -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(30000)) { Stop-Process -Id $process.Id; throw 'Packaged Recycle restore command timed out' }
+          if ($process.ExitCode -ne 2) { throw "Expected safe argument-validation exit code 2, got $($process.ExitCode)" }
       - uses: actions/upload-artifact@v4
         with:
           name: SwirPhotoClean-windows-portable
