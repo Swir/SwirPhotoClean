@@ -14,6 +14,7 @@ from . import i18n
 from .core import scan
 from .folder_health_app import PhotoCleanApp
 from .insights import folder_health
+from .scan_diagnostics import build_scan_diagnostics_report
 from .selftest import run as run_base
 from .session import SessionSnapshot, audit_session_snapshot
 
@@ -81,6 +82,12 @@ def run(destination, settings_path=None):
             assert health.total_bytes >= health.exact_reclaimable_bytes
             assert health.exact_reclaimable_percent > 0
 
+            diagnostic_report = build_scan_diagnostics_report(eco)
+            assert diagnostic_report["schema_version"] == 1
+            assert diagnostic_report["scan"]["photos"] == 2
+            assert diagnostic_report["scan"]["warnings"] == 0
+            assert diagnostic_report["issue_counts"] == {}
+
             session_snapshot = SessionSnapshot(
                 roots=(folder,),
                 threshold=6,
@@ -104,6 +111,7 @@ def run(destination, settings_path=None):
             assert hasattr(app, "open_folder_health")
             assert root.bind("<Control-f>")
             assert root.bind("<Control-h>")
+            assert root.bind("<Control-Shift-D>")
             app.result = eco
             app.render_groups()
             app.review_filter_var.set("b.png")
@@ -115,6 +123,14 @@ def run(destination, settings_path=None):
             assert app.folder_health_view is not None
             assert app.folder_health_view.health.exact_duplicate_files == 1
             assert not app.marked
+            app.open_diagnostics()
+            root.update_idletasks()
+            assert app.diagnostics_view is not None
+            assert app.diagnostics_view.__class__.__module__ == "photoclean.diagnostics_plus_gui"
+            assert app.diagnostics_view.issue_summary == ()
+            assert not app.marked
+            app.diagnostics_view.window.destroy()
+            app.diagnostics_view = None
             app.performance_profile.set("fast")
             app._performance_changed()
             root.update_idletasks()
@@ -131,7 +147,9 @@ def run(destination, settings_path=None):
             assert hasattr(app, "review_filter_entry")
             assert hasattr(app, "open_folder_health")
             assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.compare_insights_gui"
+            assert app.open_diagnostics.__func__.__module__ == "photoclean.folder_health_app"
             assert root.bind("<Control-h>")
+            assert root.bind("<Control-Shift-D>")
             root.after_cancel(app.poll_id)
             root.destroy()
             root = None
@@ -150,6 +168,9 @@ def run(destination, settings_path=None):
             folder_health_center_available=True,
             folder_health_exact_savings_conservative=True,
             folder_health_non_destructive=True,
+            structured_diagnostics_available=True,
+            structured_diagnostics_non_destructive=True,
+            diagnostics_export_available=True,
             portable_mode_exercised=portable_mode_exercised,
             portable_settings_local=portable_settings_local,
             portable_data_dir_writable=portable_data_dir_writable,

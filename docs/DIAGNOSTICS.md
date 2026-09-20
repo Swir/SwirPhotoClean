@@ -1,6 +1,6 @@
 # Diagnostics Center and Recycle Bin verification
 
-The Diagnostics Center is a non-destructive support view for SWIR PhotoClean. It summarizes the current scan and provides an explicit generated-file workflow for the final Windows Recycle Bin restore acceptance check.
+The Diagnostics Center is a non-destructive support view for SWIR PhotoClean. It summarizes the current scan, groups scanner notices by a stable support reason, can export an explicit diagnostics JSON report, and provides a generated-file workflow for the final Windows Recycle Bin restore acceptance check.
 
 ## What the Diagnostics Center shows
 
@@ -8,10 +8,32 @@ The Diagnostics Center is a non-destructive support view for SWIR PhotoClean. It
 - Current photo count, exact-group count, similar-group count and scan-warning count.
 - Number of files currently marked for the Recycle Bin.
 - Whether the current scan was cancelled.
-- Existing scan warnings without modifying the scan result.
+- Scanner skips/errors grouped by reason, while retaining the original raw warning text.
+- A user-triggered diagnostics JSON export containing runtime/scan counts, categorized reasons and raw messages. It can include local file paths from warnings, but never photo bytes.
 - A Recycle Bin preflight that checks Windows, required shell dependencies and the selected local fixed drive.
 
 None of these checks automatically select, move, rename or rewrite user photos.
+
+## Structured scan reasons
+
+New scans record a stable, language-independent reason category at the point where each skip/error occurs while preserving the existing human-readable warning stream for compatibility. Diagnostics Center uses those native categories directly, so switching PL/EN cannot change the reason assigned to a new scanner event. Older saved sessions do not contain structured issue metadata; they continue to work through a conservative PL/EN warning-text fallback. This does not change scanner matching or cleanup behavior. Current categories cover:
+
+- unavailable root folder / link;
+- reparse point or cloud placeholder skipped;
+- second hardlink skipped;
+- 40-megapixel or image-safety limit;
+- animated or multi-page image;
+- file changed during the scan;
+- access / permission error;
+- folder traversal error;
+- image read / decode error;
+- other notice.
+
+Legacy scanner messages are recognized in both Polish and English. Unknown legacy messages stay visible in full instead of being discarded or guessed aggressively. If structured metadata is incomplete for any reason, Diagnostics Center falls back to the warning stream rather than silently dropping notices.
+
+### Diagnostics JSON export
+
+Use **Diagnostics Center → Scan warnings → Export diagnostics JSON…** when a support report is useful. The export is atomic and explicitly user-selected. It contains summary counts, reason categories and raw scanner notices. `scan.issue_source` is `structured` when native scanner categories were used, or `legacy-warning-fallback` when compatibility classification was required. Raw scanner notices may contain local paths, so review the JSON before sharing it publicly. The export contains no image pixels or photo file contents and performs no cleanup action.
 
 ## Generated Recycle Bin verification
 
@@ -46,8 +68,9 @@ Legacy v1 manifests remain readable. When a valid legacy session advances to ano
 
 ## Safety properties
 
-- Personal photos are never used by the helper.
-- Preparing the test pair performs no destructive operation.
+- Personal photos are never used by the Recycle Bin verification helper.
+- Structured diagnostics and JSON export are read-only with respect to photo files.
+- Preparing the Recycle Bin test pair performs no destructive operation.
 - Moving the test copy requires an explicit user confirmation.
 - The normal `recycle_file()` path is used; there is no permanent-delete fallback.
 - A failed recycle attempt must not be treated as a successful acceptance result.
