@@ -29,7 +29,33 @@ The command creates a unique generated verification folder containing:
 
 A successful prepare command prints `MOVE_CONFIRMED` only after the recycle backend reports success, the generated original still has the expected SHA-256/size and `RECYCLE-ME.png` is absent from its original path. The manifest is then in stage `recycled`.
 
-If Windows refuses the operation, the manifest does not advance to `recycled`. The existing recycle backend has no permanent-delete fallback.
+If Windows refuses the move, the helper prints `MOVE_NOT_CONFIRMED` plus the exact prepared manifest path. The manifest stays in stage `prepared`, both generated files remain available, and there is still no permanent-delete fallback.
+
+### Retry a failed move without recreating the fixture
+
+A transient Windows/permission problem no longer requires creating a new verification session. After fixing the cause, retry the same prepared fixture:
+
+```powershell
+.\SwirPhotoClean.exe --recycle-restore-move "C:\...\recycle-verification.json"
+```
+
+The retry reloads and revalidates the tamper-evident manifest, the generated original and the generated copy before invoking the same recycle-only backend. It refuses any manifest that is no longer in the `prepared` stage and does not bypass the fixed-drive or permanent-delete protections.
+
+## Read-only status check
+
+At any point you can inspect the evidence state without changing the manifest or moving files:
+
+```powershell
+.\SwirPhotoClean.exe --recycle-restore-status "C:\...\recycle-verification.json"
+```
+
+The command validates the manifest fingerprint, ordered event log and current generated-file state. It prints the current stage plus the exact next action:
+
+- `prepared` → retry the guarded move with `--recycle-restore-move`,
+- `recycled` → restore `RECYCLE-ME.png` in Windows and run `--recycle-restore-verify`,
+- `restored-verified` → report whether `recycle-evidence-report.json` exists and whether the session is ready for human review.
+
+The status command is read-only. An inconsistent/tampered session returns `EVIDENCE_FAILED` instead of guessing or repairing evidence.
 
 ## Manual Windows restore
 
@@ -68,15 +94,19 @@ The same workflow is available through Python 3.12:
 
 ```powershell
 py -3.12 run.py --recycle-restore-prepare
+py -3.12 run.py --recycle-restore-status "PATH_TO_recycle-verification.json"
+py -3.12 run.py --recycle-restore-move "PATH_TO_recycle-verification.json"
 py -3.12 run.py --recycle-restore-verify "PATH_TO_recycle-verification.json"
 ```
 
 ## Safety boundaries
 
 - Only generated verification PNGs are involved; personal photos are never selected by this helper.
-- The move phase uses the same recycle-only backend as cleanup.
+- The move and move-retry phases use the same recycle-only backend as cleanup.
 - There is no `unlink`/permanent-delete fallback in the production move path.
 - Local fixed-drive restrictions remain enforced by `photoclean.recycle`.
+- A move retry revalidates the original/copy contents and requires the manifest to remain at `prepared`.
+- The status command is read-only and cannot advance stages.
 - The helper never empties Windows Recycle Bin.
 - The helper never performs restore itself; restore remains an explicit Windows action so the acceptance evidence is physical, not simulated.
 - Unit tests use injected temporary-file recyclers only to validate state transitions and failure safety. Those tests cannot close the physical Windows acceptance gate.
