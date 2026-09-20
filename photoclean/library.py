@@ -10,22 +10,10 @@ import threading
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
-from pathlib import Path
 from typing import Callable, Iterable
 
-from PIL import Image
-
 from .core import Photo, ScanResult
-
-_DATETIME_TAGS = (
-    (36867, "DateTimeOriginal"),
-    (36868, "DateTimeDigitized"),
-    (306, "DateTime"),
-)
-_EXIF_FORMAT = "%Y:%m:%d %H:%M:%S"
-_MAKE_TAG = 271
-_MODEL_TAG = 272
-_MAX_METADATA_TEXT = 200
+from .exif_metadata import read_exif_metadata
 
 
 @dataclass(frozen=True)
@@ -97,47 +85,16 @@ class LibraryMetadataReport:
         return self.total_count - self.device_count
 
 
-def _clean_text(value) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    text = " ".join(str(value).replace("\x00", " ").split()).strip()
-    if not text:
-        return None
-    return text[:_MAX_METADATA_TEXT]
-
-
-def _parse_datetime(value) -> datetime | None:
-    text = _clean_text(value)
-    if not text or len(text) < 19:
-        return None
-    try:
-        return datetime.strptime(text[:19], _EXIF_FORMAT)
-    except ValueError:
-        return None
-
-
 def read_library_metadata(photo: Photo) -> LibraryPhotoMetadata:
-    """Read EXIF capture and camera metadata without decoding the full image."""
+    """Read standard EXIF capture/camera metadata without decoding full pixels."""
 
-    with Image.open(photo.path) as image:
-        exif = image.getexif()
-        captured_at = None
-        capture_source = None
-        for tag, source in _DATETIME_TAGS:
-            captured_at = _parse_datetime(exif.get(tag))
-            if captured_at is not None:
-                capture_source = source
-                break
-        make = _clean_text(exif.get(_MAKE_TAG))
-        model = _clean_text(exif.get(_MODEL_TAG))
+    metadata = read_exif_metadata(photo.path)
     return LibraryPhotoMetadata(
         photo=photo,
-        captured_at=captured_at,
-        capture_source=capture_source,
-        camera_make=make,
-        camera_model=model,
+        captured_at=metadata.captured_at,
+        capture_source=metadata.capture_source,
+        camera_make=metadata.camera_make,
+        camera_model=metadata.camera_model,
     )
 
 

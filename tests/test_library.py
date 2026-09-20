@@ -4,18 +4,36 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from PIL import Image
+from PIL import ExifTags, Image
 
 from photoclean.core import ScanResult, read_photo
 from photoclean.library import analyze_library_metadata, read_library_metadata
 
 
 class LibraryMetadataTests(unittest.TestCase):
-    def _photo(self, folder, name, *, captured=None, make=None, model=None):
+    def _photo(
+        self,
+        folder,
+        name,
+        *,
+        captured=None,
+        make=None,
+        model=None,
+        nested=False,
+        subsecond=None,
+    ):
         path = Path(folder) / name
         exif = Image.Exif()
         if captured is not None:
-            exif[36867] = captured
+            if nested:
+                nested_exif = {36867: captured}
+                if subsecond is not None:
+                    nested_exif[37521] = subsecond
+                exif[ExifTags.IFD.Exif] = nested_exif
+            else:
+                exif[36867] = captured
+                if subsecond is not None:
+                    exif[37521] = subsecond
         if make is not None:
             exif[271] = make
         if model is not None:
@@ -55,6 +73,27 @@ class LibraryMetadataTests(unittest.TestCase):
             self.assertEqual(len(report.devices), 1)
             self.assertEqual(report.devices[0].label, "Apple iPhone 15 Pro")
             self.assertEqual(len(report.devices[0].photos), 2)
+
+    def test_standard_nested_exif_ifd_populates_timeline_and_subseconds(self):
+        with tempfile.TemporaryDirectory() as folder:
+            photo = self._photo(
+                folder,
+                "nested.jpg",
+                captured="2026:09:20 06:07:08",
+                make="Google",
+                model="Pixel 10 Pro",
+                nested=True,
+                subsecond="9876543",
+            )
+            item = read_library_metadata(photo)
+            self.assertEqual(item.capture_source, "DateTimeOriginal")
+            self.assertEqual(item.captured_at.microsecond, 987654)
+            self.assertEqual(item.device_label, "Google Pixel 10 Pro")
+
+            report = analyze_library_metadata([photo])
+            self.assertEqual(report.captured_count, 1)
+            self.assertEqual(report.timeline[0].day.isoformat(), "2026-09-20")
+            self.assertEqual(report.devices[0].label, "Google Pixel 10 Pro")
 
     def test_no_filesystem_time_fallback_and_newest_days_first(self):
         with tempfile.TemporaryDirectory() as folder:
