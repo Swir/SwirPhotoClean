@@ -30,6 +30,23 @@ class SafetyError(Exception):
     pass
 
 
+class ScanIssueError(ValueError):
+    """Internal scanner exception carrying a stable, language-independent reason."""
+
+    def __init__(self, category: str, message: str):
+        self.category = category
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class ScanIssue:
+    """Structured scanner notice kept alongside the legacy human-readable warning."""
+
+    category: str
+    message: str
+    path: Path | None = None
+
+
 @dataclass(frozen=True)
 class Photo:
     path: Path
@@ -56,6 +73,26 @@ class ScanResult:
     groups: list[Group] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     cancelled: bool = False
+    issues: list[ScanIssue] = field(default_factory=list)
+
+
+def record_scan_issue(
+    result: ScanResult,
+    category: str,
+    message: str,
+    path: Path | None = None,
+) -> None:
+    """Append one scanner issue without breaking the historical ``warnings`` API."""
+
+    text = str(message)
+    result.warnings.append(text)
+    result.issues.append(
+        ScanIssue(
+            category=str(category),
+            message=text,
+            path=Path(path) if path is not None else None,
+        )
+    )
 
 
 def checkpoint(cancel: threading.Event):
@@ -103,9 +140,9 @@ def read_photo(path: Path, cancel: threading.Event, performance_profile: str | P
         with Image.open(path) as source:
             checkpoint(cancel)
             if source.width * source.height > MAX_PIXELS:
-                raise ValueError(tr('obraz przekracza limit 40 megapikseli'))
+                raise ScanIssueError("pixel_limit", tr('obraz przekracza limit 40 megapikseli'))
             if getattr(source, "n_frames", 1) > 1:
-                raise ValueError(tr('obraz animowany lub wielostronicowy — pominięty'))
+                raise ScanIssueError("multi_frame", tr('obraz animowany lub wielostronicowy — pominięty'))
             oriented = ImageOps.exif_transpose(source)
             checkpoint(cancel)
             im = oriented.convert("RGBA")
@@ -127,7 +164,7 @@ def read_photo(path: Path, cancel: threading.Event, performance_profile: str | P
             checkpoint(cancel)
     after = path.stat()
     if signature(before) != signature(after):
-        raise ValueError(tr('plik zmienił się podczas skanowania'))
+        raise ScanIssueError("changed_during_scan", tr('plik zmienił się podczas skanowania'))
     return Photo(path, *signature(after), digest, width, height, bits, color)
 
 
@@ -184,11 +221,34 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
     try:
         for root in roots:
             root = Path(os.path.abspath(root))
-            if not root.is_dir() or linked(root):
-                result.warnings.append(tr('{v0}: folder niedostępny lub dowiązanie', v0=root))
+            try:
+                root_is_dir = root.is_dir()
+                root_is_linked = linked(root) if root_is_dir else False
+            except PermissionError as error:
+                record_scan_issue(result, "access_error", f"{root}: {error}", root)
                 continue
+            except OSError as error:
+                record_scan_issue(result, "root_unavailable", f"{root}: {error}", root)
+                continue
+            if not root_is_dir or root_is_linked:
+                record_scan_issue(
+                    result,
+                    "root_unavailable",
+                    tr('{v0}: folder niedostępny lub dowiązanie', v0=root),
+                    root,
+                )
+                continue
+
             def walk_error(error):
-                result.warnings.append(str(error))
+                category = "access_error" if isinstance(error, PermissionError) else "walk_error"
+                filename = getattr(error, "filename", None)
+                record_scan_issue(
+                    result,
+                    category,
+                    str(error),
+                    Path(filename) if filename else None,
+                )
+
             for folder, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
                 checkpoint(cancel)
                 # Sort in place to keep deterministic traversal without allocating a
@@ -201,7 +261,8 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                         if not linked(Path(folder) / name):
                             kept.append(name)
                     except OSError as error:
-                        result.warnings.append(str(error))
+                        category = "access_error" if isinstance(error, PermissionError) else "walk_error"
+                        record_scan_issue(result, category, str(error), Path(folder) / name)
                 dirs[:] = kept
                 files.sort()
                 for name in files:
@@ -215,12 +276,22 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                     seen_paths.add(key)
                     try:
                         if linked(path):
-                            result.warnings.append(tr('{v0}: dowiązanie / plik chmurowy — pominięty', v0=path))
+                            record_scan_issue(
+                                result,
+                                "reparse_skipped",
+                                tr('{v0}: dowiązanie / plik chmurowy — pominięty', v0=path),
+                                path,
+                            )
                             continue
                         info = path.stat()
                         inode = (info.st_dev, info.st_ino)
                         if info.st_ino and inode in seen_inodes:
-                            result.warnings.append(tr('{v0}: drugie dowiązanie do tego samego pliku — pominięte', v0=path))
+                            record_scan_issue(
+                                result,
+                                "hardlink_skipped",
+                                tr('{v0}: drugie dowiązanie do tego samego pliku — pominięte', v0=path),
+                                path,
+                            )
                             continue
                         photo = read_photo(path, cancel, profile)
                         seen_inodes.add(inode)
@@ -228,8 +299,14 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
                         progress(tr('Odczytano {v0} zdjęć • {v1}', v0=len(result.photos), v1=name))
                     except Cancelled:
                         raise
-                    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
-                        result.warnings.append(f"{path}: {error}")
+                    except ScanIssueError as error:
+                        record_scan_issue(result, error.category, f"{path}: {error}", path)
+                    except PermissionError as error:
+                        record_scan_issue(result, "access_error", f"{path}: {error}", path)
+                    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
+                        record_scan_issue(result, "pixel_limit", f"{path}: {error}", path)
+                    except (OSError, ValueError) as error:
+                        record_scan_issue(result, "image_read_error", f"{path}: {error}", path)
         exact = defaultdict(list)
         for photo in result.photos:
             checkpoint(cancel)

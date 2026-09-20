@@ -6,7 +6,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import i18n
 from .diagnostics_gui import DiagnosticsWindow
-from .scan_diagnostics import summarize_scan_warnings, write_scan_diagnostics_report
+from .scan_diagnostics import summarize_scan_result, write_scan_diagnostics_report
 
 
 PLUS_EN = {
@@ -58,7 +58,7 @@ class EnhancedDiagnosticsWindow(DiagnosticsWindow):
     """Diagnostics view that explains skips/errors without altering scan state."""
 
     def _build_warnings(self, parent):
-        self.issue_summary = summarize_scan_warnings(self.app.result.warnings)
+        self.issue_summary = summarize_scan_result(self.app.result)
 
         toolbar = ttk.Frame(parent)
         toolbar.pack(fill="x", pady=(0, 8))

@@ -16,7 +16,7 @@ None of these checks automatically select, move, rename or rewrite user photos.
 
 ## Structured scan reasons
 
-The scanner's existing human-readable warning stream remains the compatibility source. Diagnostics Center adds stable support categories on top so a large scan is easier to understand without changing scanner or cleanup behavior. Current categories cover:
+New scans record a stable, language-independent reason category at the point where each skip/error occurs while preserving the existing human-readable warning stream for compatibility. Diagnostics Center uses those native categories directly, so switching PL/EN cannot change the reason assigned to a new scanner event. Older saved sessions do not contain structured issue metadata; they continue to work through a conservative PL/EN warning-text fallback. This does not change scanner matching or cleanup behavior. Current categories cover:
 
 - unavailable root folder / link;
 - reparse point or cloud placeholder skipped;
@@ -29,11 +29,11 @@ The scanner's existing human-readable warning stream remains the compatibility s
 - image read / decode error;
 - other notice.
 
-Known scanner messages are recognized in both Polish and English. Unknown messages stay visible in full instead of being discarded or guessed aggressively.
+Legacy scanner messages are recognized in both Polish and English. Unknown legacy messages stay visible in full instead of being discarded or guessed aggressively. If structured metadata is incomplete for any reason, Diagnostics Center falls back to the warning stream rather than silently dropping notices.
 
 ### Diagnostics JSON export
 
-Use **Diagnostics Center → Scan warnings → Export diagnostics JSON…** when a support report is useful. The export is atomic and explicitly user-selected. It contains summary counts, reason categories and raw scanner notices. Raw scanner notices may contain local paths, so review the JSON before sharing it publicly. The export contains no image pixels or photo file contents and performs no cleanup action.
+Use **Diagnostics Center → Scan warnings → Export diagnostics JSON…** when a support report is useful. The export is atomic and explicitly user-selected. It contains summary counts, reason categories and raw scanner notices. `scan.issue_source` is `structured` when native scanner categories were used, or `legacy-warning-fallback` when compatibility classification was required. Raw scanner notices may contain local paths, so review the JSON before sharing it publicly. The export contains no image pixels or photo file contents and performs no cleanup action.
 
 ## Generated Recycle Bin verification
 

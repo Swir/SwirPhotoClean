@@ -1,8 +1,9 @@
-"""Structured, read-only scanner diagnostics built from the existing warning stream.
+"""Structured, read-only scanner diagnostics with legacy-session compatibility.
 
-The scanner keeps its long-standing human-readable ``ScanResult.warnings`` contract.
-This module adds stable support categories on top, so Diagnostics Center can explain
-why items were skipped without changing matching or cleanup semantics.
+New scans carry stable, language-independent issue categories alongside the existing
+human-readable ``ScanResult.warnings`` contract. Older saved sessions contain only
+warning strings, so Diagnostics Center keeps a conservative PL/EN fallback classifier.
+Neither path changes matching, review, or cleanup semantics.
 """
 from __future__ import annotations
 
@@ -93,7 +94,35 @@ def classify_scan_warning(warning: str) -> str:
 
 
 def summarize_scan_warnings(warnings) -> tuple[tuple[str, int], ...]:
+    """Summarize legacy warning strings for old sessions and compatibility callers."""
+
     counts = Counter(classify_scan_warning(item) for item in warnings)
+    return tuple((category, counts[category]) for category in CATEGORY_ORDER if counts[category])
+
+
+def scan_issue_records(result: ScanResult) -> tuple[tuple[str, str], ...]:
+    """Return stable issue categories, preferring scanner-native structured data.
+
+    New scans populate ``ScanResult.issues`` and therefore do not depend on the
+    current UI language. Older saved sessions only contain ``warnings``; those
+    keep working through the conservative text classifier. If third-party code
+    mutates one list without the other, fall back to warnings so no notice is lost.
+    """
+
+    issues = getattr(result, "issues", ())
+    if issues and len(issues) == len(result.warnings):
+        return tuple(
+            (
+                issue.category if issue.category in CATEGORY_ORDER else "other",
+                str(issue.message),
+            )
+            for issue in issues
+        )
+    return tuple((classify_scan_warning(warning), str(warning)) for warning in result.warnings)
+
+
+def summarize_scan_result(result: ScanResult) -> tuple[tuple[str, int], ...]:
+    counts = Counter(category for category, _message in scan_issue_records(result))
     return tuple((category, counts[category]) for category in CATEGORY_ORDER if counts[category])
 
 
@@ -101,7 +130,9 @@ def build_scan_diagnostics_report(result: ScanResult, marked_count: int = 0) -> 
     """Build a JSON-serializable diagnostics report without touching photo files."""
 
     snapshot = build_diagnostics_snapshot(result, marked_count)
-    issue_counts = dict(summarize_scan_warnings(result.warnings))
+    records = scan_issue_records(result)
+    issue_counts = dict(summarize_scan_result(result))
+    structured = bool(getattr(result, "issues", ())) and len(result.issues) == len(result.warnings)
     return {
         "schema_version": SCHEMA_VERSION,
         "runtime": {
@@ -116,14 +147,15 @@ def build_scan_diagnostics_report(result: ScanResult, marked_count: int = 0) -> 
             "warnings": snapshot.warning_count,
             "marked_for_recycle_bin": snapshot.marked_count,
             "cancelled": snapshot.cancelled,
+            "issue_source": "structured" if structured else "legacy-warning-fallback",
         },
         "issue_counts": issue_counts,
         "issues": [
             {
-                "category": classify_scan_warning(warning),
-                "message": str(warning),
+                "category": category,
+                "message": message,
             }
-            for warning in result.warnings
+            for category, message in records
         ],
         "privacy_note": (
             "This explicit diagnostics export may contain local file paths embedded "
