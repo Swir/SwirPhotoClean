@@ -10,11 +10,12 @@ import os
 import tkinter as tk
 
 from .compare_insights_gui import PhotoCleanApp as ReviewPhotoCleanApp
+from .diagnostics_plus_gui import EnhancedDiagnosticsWindow
 from .folder_health_gui import FolderHealthWindow, health_tr
 
 
 class PhotoCleanApp(ReviewPhotoCleanApp):
-    """Final app with a persistent, read-only Folder Health Center."""
+    """Final app with Folder Health and structured Diagnostics Center."""
 
     def __init__(self, root, settings_path=None):
         self.folder_health_view = None
@@ -32,6 +33,20 @@ class PhotoCleanApp(ReviewPhotoCleanApp):
         )
         self.root.bind("<Control-h>", lambda event: self.open_folder_health())
         self.root.bind("<Control-H>", lambda event: self.open_folder_health())
+
+    def open_diagnostics(self):
+        """Open the enhanced read-only diagnostics view from the final app stack."""
+
+        existing = getattr(self, "diagnostics_view", None)
+        if existing is not None:
+            try:
+                if existing.window.winfo_exists():
+                    existing.window.lift()
+                    existing.window.focus_set()
+                    return
+            except tk.TclError:
+                pass
+        self.diagnostics_view = EnhancedDiagnosticsWindow(self)
 
     def open_folder_health(self):
         """Open or refresh the report without rescanning or changing marks."""
