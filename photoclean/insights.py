@@ -1,10 +1,11 @@
 """Explainable, read-only cleanup insights.
 
 This module never marks or removes files. It only summarizes scan results and
-produces a conservative Smart Keep recommendation for review in the GUI.
+produces conservative review signals such as Smart Keep and Folder Health.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,15 +41,25 @@ class KeeperRecommendation:
 
 @dataclass(frozen=True)
 class FolderHealth:
-    """Conservative scan summary suitable for UI/reporting."""
+    """Conservative scan summary suitable for UI/reporting.
+
+    All reclaimable-byte figures are derived only from byte-identical SHA-256
+    groups and preserve at least one copy for each digest. Similar-photo groups
+    remain review-only and never contribute to the savings estimate.
+    """
 
     total_photos: int
+    total_bytes: int
+    grouped_files: int
+    unflagged_files: int
     exact_groups: int
+    exact_group_members: int
     exact_duplicate_files: int
     similar_groups: int
     similar_review_files: int
     warning_count: int
     exact_reclaimable_bytes: int
+    exact_reclaimable_percent: float
     largest_files: tuple[Photo, ...]
 
 
@@ -135,12 +146,39 @@ def recommend_keeper(group: Group) -> KeeperRecommendation:
     )
 
 
-def folder_health(result: ScanResult, largest_limit: int = 5) -> FolderHealth:
-    """Summarize a scan without treating similar photos as guaranteed savings.
+def _exact_digest_buckets(
+    groups: list[Group],
+    scanned_by_path: dict[Path, Photo],
+) -> dict[str, dict[Path, Photo]]:
+    """Deduplicate trustworthy exact membership by SHA-256 digest and path.
 
-    `exact_reclaimable_bytes` counts only byte-identical duplicates and always
-    preserves one member of each exact group. Similar groups are review
-    candidates only and never contribute to the reclaimable-byte estimate.
+    `ScanResult.photos` is the authoritative set. A stale/malformed adapter must
+    not inflate health numbers by injecting a path outside that set or by pairing
+    a path with metadata that disagrees with the scanned photo.
+    """
+
+    buckets: dict[str, dict[Path, Photo]] = defaultdict(dict)
+    for group in groups:
+        for member in group.photos:
+            photo = scanned_by_path.get(member.path)
+            if photo is None or photo.digest != member.digest:
+                continue
+            buckets[photo.digest].setdefault(photo.path, photo)
+    return {
+        digest: members
+        for digest, members in buckets.items()
+        if len(members) >= 2
+    }
+
+
+def folder_health(result: ScanResult, largest_limit: int = 5) -> FolderHealth:
+    """Build a conservative, read-only health report for the scanned library.
+
+    Safe savings are counted only for exact SHA-256 duplicates. For every digest
+    bucket one copy is always preserved, and repeated paths/groups cannot inflate
+    the total. Similar groups are review candidates only. `grouped_files` is the
+    unique union of exact and similar result members; `unflagged_files` are scanned
+    photos that currently appear in neither type of result group.
     """
 
     if largest_limit < 0:
@@ -149,22 +187,58 @@ def folder_health(result: ScanResult, largest_limit: int = 5) -> FolderHealth:
     exact_groups = [group for group in result.groups if group.kind == "exact"]
     similar_groups = [group for group in result.groups if group.kind == "similar"]
 
-    exact_duplicate_files = sum(max(0, len(group.photos) - 1) for group in exact_groups)
-    exact_reclaimable_bytes = sum(
-        max(0, sum(photo.size for photo in group.photos) - max(photo.size for photo in group.photos))
-        for group in exact_groups
-        if group.photos
+    scanned_by_path = {photo.path: photo for photo in result.photos}
+    scanned_paths = set(scanned_by_path)
+    exact_buckets = _exact_digest_buckets(exact_groups, scanned_by_path)
+    exact_paths = {path for bucket in exact_buckets.values() for path in bucket}
+
+    similar_member_sets = {
+        frozenset(photo.path for photo in group.photos if photo.path in scanned_paths)
+        for group in similar_groups
+    }
+    similar_member_sets = {members for members in similar_member_sets if len(members) >= 2}
+    similar_paths = set().union(*similar_member_sets) if similar_member_sets else set()
+    grouped_paths = exact_paths | similar_paths
+
+    exact_duplicate_files = 0
+    exact_reclaimable_bytes = 0
+    for bucket in exact_buckets.values():
+        photos = tuple(bucket.values())
+        if len(photos) < 2:
+            continue
+        exact_duplicate_files += len(photos) - 1
+        # Keep the largest member in the extremely defensive case where malformed
+        # external/session data associates one digest with inconsistent sizes.
+        exact_reclaimable_bytes += max(
+            0,
+            sum(max(0, photo.size) for photo in photos)
+            - max(max(0, photo.size) for photo in photos),
+        )
+
+    total_bytes = sum(max(0, photo.size) for photo in result.photos)
+    exact_reclaimable_percent = (
+        (exact_reclaimable_bytes / total_bytes) * 100.0 if total_bytes else 0.0
     )
-    similar_review_paths = {photo.path for group in similar_groups for photo in group.photos}
-    largest_files = tuple(sorted(result.photos, key=lambda photo: photo.size, reverse=True)[:largest_limit])
+    largest_files = tuple(
+        sorted(
+            result.photos,
+            key=lambda photo: (photo.size, str(photo.path).casefold()),
+            reverse=True,
+        )[:largest_limit]
+    )
 
     return FolderHealth(
         total_photos=len(result.photos),
-        exact_groups=len(exact_groups),
+        total_bytes=total_bytes,
+        grouped_files=len(grouped_paths),
+        unflagged_files=max(0, len(result.photos) - len(grouped_paths)),
+        exact_groups=len(exact_buckets),
+        exact_group_members=len(exact_paths),
         exact_duplicate_files=exact_duplicate_files,
-        similar_groups=len(similar_groups),
-        similar_review_files=len(similar_review_paths),
+        similar_groups=len(similar_member_sets),
+        similar_review_files=len(similar_paths),
         warning_count=len(result.warnings),
         exact_reclaimable_bytes=exact_reclaimable_bytes,
+        exact_reclaimable_percent=round(exact_reclaimable_percent, 2),
         largest_files=largest_files,
     )

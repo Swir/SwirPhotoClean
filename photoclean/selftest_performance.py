@@ -9,8 +9,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from .compare_insights_gui import PhotoCleanApp
 from .core import scan
+from .folder_health_app import PhotoCleanApp
+from .insights import folder_health
 from .selftest import run as run_base
 from .session import SessionSnapshot, audit_session_snapshot
 
@@ -39,6 +40,13 @@ def run(destination):
             fast = scan([folder], performance_profile="fast")
             assert _canonical(eco) == _canonical(fast)
 
+            health = folder_health(eco)
+            assert health.total_photos == 2
+            assert health.exact_duplicate_files == 1
+            assert health.exact_reclaimable_bytes > 0
+            assert health.total_bytes >= health.exact_reclaimable_bytes
+            assert health.exact_reclaimable_percent > 0
+
             session_snapshot = SessionSnapshot(
                 roots=(folder,),
                 threshold=6,
@@ -59,12 +67,19 @@ def run(destination):
             assert hasattr(app, "review_sort_box")
             assert app.review_sort_mode == "recommended"
             assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.compare_insights_gui"
+            assert hasattr(app, "open_folder_health")
             assert root.bind("<Control-f>")
+            assert root.bind("<Control-h>")
             app.result = eco
             app.render_groups()
             app.review_filter_var.set("b.png")
             app._apply_review_view()
             assert len(app.files.get_children()) == 1
+            assert not app.marked
+            app.open_folder_health()
+            root.update_idletasks()
+            assert app.folder_health_view is not None
+            assert app.folder_health_view.health.exact_duplicate_files == 1
             assert not app.marked
             app.performance_profile.set("fast")
             app._performance_changed()
@@ -80,7 +95,9 @@ def run(destination):
             assert app.performance_profile.get() == "fast"
             assert hasattr(app, "performance_menu")
             assert hasattr(app, "review_filter_entry")
+            assert hasattr(app, "open_folder_health")
             assert app.open_fullscreen_compare.__func__.__module__ == "photoclean.compare_insights_gui"
+            assert root.bind("<Control-h>")
             root.after_cancel(app.poll_id)
             root.destroy()
             root = None
@@ -96,6 +113,9 @@ def run(destination):
             fullscreen_review_insights_available=True,
             session_resume_preflight_available=True,
             session_resume_preflight_non_destructive=True,
+            folder_health_center_available=True,
+            folder_health_exact_savings_conservative=True,
+            folder_health_non_destructive=True,
         )
     except Exception as error:
         report["ok"] = False
