@@ -20,6 +20,8 @@ from PIL import Image, ImageOps
 
 EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
 MAX_PIXELS = 40_000_000
+_EXIF_ORIENTATION_TAG = 274
+_EXIF_TRANSFORMED_ORIENTATIONS = frozenset({2, 3, 4, 5, 6, 7, 8})
 
 
 class Cancelled(Exception):
@@ -129,6 +131,44 @@ def sha256(path: Path, cancel: threading.Event, performance_profile: str | Perfo
     return digest.hexdigest()
 
 
+def _exif_orientation(image: Image.Image) -> int:
+    """Return a safe EXIF orientation value without forcing a pixel copy."""
+
+    try:
+        value = image.getexif().get(_EXIF_ORIENTATION_TAG, 1)
+        return int(value) if value is not None else 1
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 1
+
+
+def _analysis_rgb(image: Image.Image) -> Image.Image:
+    """Return correctly oriented RGB pixels with minimal full-size buffers.
+
+    The old path always created an oriented copy, an RGBA copy, an RGBA white
+    background and then a final RGB copy. Most camera photos are already opaque
+    RGB with orientation 1, so those allocations were pure overhead. This helper
+    keeps the exact same white-matte behavior when alpha/transparency is present,
+    while reusing the source/oriented RGB buffer whenever it is safe to do so.
+    """
+
+    orientation = _exif_orientation(image)
+    oriented = (
+        ImageOps.exif_transpose(image)
+        if orientation in _EXIF_TRANSFORMED_ORIENTATIONS
+        else image
+    )
+
+    has_transparency = oriented.mode in {"RGBA", "LA"} or "transparency" in oriented.info
+    if has_transparency:
+        rgba = oriented.convert("RGBA")
+        background = Image.new("RGBA", rgba.size, "white")
+        background.alpha_composite(rgba)
+        return background.convert("RGB")
+    if oriented.mode == "RGB":
+        return oriented
+    return oriented.convert("RGB")
+
+
 def read_photo(path: Path, cancel: threading.Event, performance_profile: str | PerformanceProfile | None = None) -> Photo:
     profile = get_performance_profile(performance_profile)
     checkpoint(cancel)
@@ -143,14 +183,8 @@ def read_photo(path: Path, cancel: threading.Event, performance_profile: str | P
                 raise ScanIssueError("pixel_limit", tr('obraz przekracza limit 40 megapikseli'))
             if getattr(source, "n_frames", 1) > 1:
                 raise ScanIssueError("multi_frame", tr('obraz animowany lub wielostronicowy — pominięty'))
-            oriented = ImageOps.exif_transpose(source)
+            rgb = _analysis_rgb(source)
             checkpoint(cancel)
-            im = oriented.convert("RGBA")
-            checkpoint(cancel)
-            background = Image.new("RGBA", im.size, "white")
-            background.alpha_composite(im)
-            checkpoint(cancel)
-            rgb = background.convert("RGB")
             width, height = rgb.size
             gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
             checkpoint(cancel)

@@ -10,6 +10,12 @@ SWIR PhotoClean provides three scanner profiles. They tune file-reading and coop
 
 The scanner still runs in a background worker. All profiles keep cancellation checkpoints during hashing, image decode stages, directory traversal, exact grouping and similar-photo grouping. Large directory lists are sorted in place to avoid allocating an additional full list merely for deterministic traversal.
 
+## Large-photo memory behavior
+
+The scanner avoids unnecessary full-resolution intermediate image buffers on the common camera-photo path. An opaque RGB image whose EXIF orientation is already normal can be analyzed directly instead of always creating a full-size EXIF-transposed copy, RGBA copy, white matte and second RGB copy. Files that really need orientation correction still use EXIF transpose, while alpha/transparency still uses the same explicit white-matte behavior as before.
+
+This optimization changes allocation behavior only. The resulting oriented dimensions, dHash, low-resolution color signature and full-file SHA-256 remain governed by the same rules, and regression tests cover the opaque fast path, transparent white matte and rotated EXIF path.
+
 ## Safety and determinism
 
 - A profile is captured when a scan starts; changing the menu while a scan is running affects only the next scan.
@@ -36,6 +42,12 @@ For a heavier manual stress run, increase both library size and pixel count, for
 
 ```powershell
 python tools/benchmark_scan_profiles.py --count 1000 --runs 1 --width 2400 --height 1600 --cancel-after 50 --json large-library.json
+```
+
+To focus on the high-resolution allocation path, use fewer but much larger generated photos (still below the 40 MP safety limit), for example:
+
+```powershell
+python tools/benchmark_scan_profiles.py --count 120 --runs 1 --width 6000 --height 4000 --cancel-after 15 --json highres-library.json
 ```
 
 The benchmark never performs cleanup and never calls the Recycle Bin. There is intentionally no fixed timing or memory threshold in CI because storage, cache state, antivirus activity and runner hardware make those values environment-dependent; the JSON output is intended for regression comparison on the same machine.
