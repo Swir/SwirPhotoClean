@@ -27,16 +27,16 @@ class ReleaseGateTests(unittest.TestCase):
             release_channel("1.0.0", 9, 8)
 
     def test_version_is_read_from_project_assignment(self):
-        self.assertEqual(parse_version('__version__ = "1.0.0"\\n'), "1.0.0")
+        self.assertEqual(parse_version('__version__ = "1.0.0"\n'), "1.0.0")
 
     def test_non_semantic_version_is_rejected(self):
         with self.assertRaises(ReleaseGateError):
-            parse_version('__version__ = "1.0"\\n')
+            parse_version('__version__ = "1.0"\n')
 
     def test_release_notes_must_match_exact_version(self):
-        validate_release_notes("0.3.0", "# SWIR PhotoClean 0.3.0\\n\\nNotes\\n")
+        validate_release_notes("0.3.0", "# SWIR PhotoClean 0.3.0\n\nNotes\n")
         with self.assertRaises(ReleaseGateError):
-            validate_release_notes("1.0.0", "# SWIR PhotoClean 0.3.0\\n")
+            validate_release_notes("1.0.0", "# SWIR PhotoClean 0.3.0\n")
 
 
 if __name__ == "__main__":
