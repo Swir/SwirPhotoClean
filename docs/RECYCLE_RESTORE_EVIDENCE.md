@@ -119,6 +119,8 @@ py -3.12 tools\release_evidence.py verify
 
 For qualified Beta/RC/1.x releases, `tools/release_gate.py` fails closed unless the authoritative acceptance checklist is complete **and** this sanitized evidence contract is valid. Historical/general 0.x preview development remains unaffected. `RELEASE_EVIDENCE.json` is release provenance, not a substitute for the raw local manifest/report review and not permission to mark `STATUS.md` complete by itself.
 
+When a qualified release is actually published, the same validated `RELEASE_EVIDENCE.json` is copied inside the Windows ZIP and uploaded as a separate public release asset. The release workflow validates the embedded copy before publication, downloads the public sidecar after publication, compares its SHA-256 with the tested repository copy, validates it again, and verifies the copy extracted from the published ZIP. This keeps the runtime-evidence handoff auditable together with the existing archive checksum and release provenance checks.
+
 ### Interrupted report export is recoverable
 
 The `restored-verified` manifest transition is deliberately durable. If verification proves the restore but writing `recycle-evidence-report.json` then fails because of a temporary disk or permission problem, **do not repeat the move/restore cycle** and do not edit the manifest. Run the same `--recycle-restore-verify` command again after fixing the write problem.
