@@ -29,6 +29,11 @@ if __name__ == "__main__":
 
         raise SystemExit(run(runtime.argv[1], settings_path=runtime.settings_path))
 
+    if runtime.argv and runtime.argv[0] == "--recycle-restore-attest":
+        from photoclean.release_evidence_cli import cli_main
+
+        raise SystemExit(cli_main(runtime.argv))
+
     if runtime.argv and runtime.argv[0] in {
         "--recycle-restore-prepare",
         "--recycle-restore-move",

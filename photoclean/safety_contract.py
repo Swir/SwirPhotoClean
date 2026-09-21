@@ -28,6 +28,8 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/diagnostics.py",
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
+    "photoclean/release_attestation.py",
+    "photoclean/release_evidence_cli.py",
     "photoclean/safety_contract.py",
     "photoclean/selftest.py",
     "photoclean/selftest_performance.py",
@@ -95,7 +97,9 @@ def validate_safety_contract(payload: object) -> dict:
     if not isinstance(payload, dict):
         raise SafetyContractError("safety contract must contain a JSON object")
     if set(payload) != {"schema_version", "kind", "files", "sha256"}:
-        raise SafetyContractError("safety contract contains missing or unsupported fields")
+        raise SafetyContractError(
+            "safety contract contains missing or unsupported fields"
+        )
     if payload["schema_version"] != SCHEMA_VERSION:
         raise SafetyContractError("unsupported safety-contract schema version")
     if payload["kind"] != KIND:
