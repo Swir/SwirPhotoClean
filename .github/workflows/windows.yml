@@ -87,7 +87,19 @@ jobs:
         run: |
           $version = (Select-String -Path photoclean/__init__.py -Pattern '__version__ = "([^"]+)"').Matches.Groups[1].Value
           if (-not $version) { throw 'Missing version' }
+
+          $releaseEvidence = Join-Path $PWD 'RELEASE_EVIDENCE.json'
+          $hasReleaseEvidence = Test-Path $releaseEvidence
+          if ($hasReleaseEvidence) {
+            python tools/release_evidence.py verify --file $releaseEvidence
+            if ($LASTEXITCODE -ne 0) { throw 'Release runtime evidence validation failed' }
+          }
+
           Copy-Item README.md, RELEASE_NOTES.md, STATUS.md package/SwirPhotoClean/
+          if ($hasReleaseEvidence) {
+            Copy-Item $releaseEvidence package/SwirPhotoClean/
+          }
+
           $archive = "SwirPhotoClean-$version-Windows.zip"
           $checksum = "$archive.sha256"
           $provenance = "$archive.provenance.json"
@@ -107,6 +119,12 @@ jobs:
           Expand-Archive -Path $archive -DestinationPath $prepublishRoot
           $prepublishExe = Join-Path $prepublishRoot 'SwirPhotoClean/SwirPhotoClean.exe'
           if (-not (Test-Path $prepublishExe)) { throw 'Release archive is missing SwirPhotoClean.exe' }
+          if ($hasReleaseEvidence) {
+            $embeddedEvidence = Join-Path $prepublishRoot 'SwirPhotoClean/RELEASE_EVIDENCE.json'
+            if (-not (Test-Path $embeddedEvidence)) { throw 'Qualified release archive is missing RELEASE_EVIDENCE.json' }
+            python tools/release_evidence.py verify --file $embeddedEvidence
+            if ($LASTEXITCODE -ne 0) { throw 'Embedded release runtime evidence is invalid' }
+          }
           $prepublishReport = Join-Path $PWD 'release-archive-smoke.json'
           $process = Start-Process -FilePath $prepublishExe -ArgumentList '--self-test', $prepublishReport -WindowStyle Hidden -PassThru
           if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Release archive self-test timed out' }
@@ -114,10 +132,15 @@ jobs:
           $report = Get-Content $prepublishReport -Raw | ConvertFrom-Json
           if (-not $report.ok) { throw 'Release archive self-test report failed' }
 
+          $releaseAssets = @($archive, $checksum, $provenance)
+          if ($hasReleaseEvidence) {
+            $releaseAssets += $releaseEvidence
+          }
+
           if ($channel -eq 'stable') {
-            gh release create "v$version" $archive $checksum $provenance --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md
+            gh release create "v$version" @releaseAssets --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md
           } elseif ($channel -eq 'prerelease') {
-            gh release create "v$version" $archive $checksum $provenance --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md --prerelease
+            gh release create "v$version" @releaseAssets --target $env:GITHUB_SHA --title "SWIR PhotoClean $version — Polski / English" --notes-file RELEASE_NOTES.md --prerelease
           } else {
             throw "Unknown release channel: $channel"
           }
@@ -127,6 +150,17 @@ jobs:
           New-Item -ItemType Directory -Path $publishedRoot -Force | Out-Null
           gh release download "v$version" --dir $publishedRoot --pattern $archive --pattern $checksum --pattern $provenance
           if ($LASTEXITCODE -ne 0) { throw 'Could not download published release assets' }
+
+          if ($hasReleaseEvidence) {
+            gh release download "v$version" --dir $publishedRoot --pattern 'RELEASE_EVIDENCE.json'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download published runtime evidence' }
+            $publishedEvidence = Join-Path $publishedRoot 'RELEASE_EVIDENCE.json'
+            $expectedEvidenceDigest = (Get-FileHash $releaseEvidence -Algorithm SHA256).Hash.ToLower()
+            $actualEvidenceDigest = (Get-FileHash $publishedEvidence -Algorithm SHA256).Hash.ToLower()
+            if ($expectedEvidenceDigest -ne $actualEvidenceDigest) { throw 'Published runtime evidence differs from tested source evidence' }
+            python tools/release_evidence.py verify --file $publishedEvidence
+            if ($LASTEXITCODE -ne 0) { throw 'Published release runtime evidence is invalid' }
+          }
 
           $publishedArchive = Join-Path $publishedRoot $archive
           $publishedChecksum = Join-Path $publishedRoot $checksum
@@ -145,6 +179,12 @@ jobs:
           Expand-Archive -Path $publishedArchive -DestinationPath $publishedExtracted
           $publishedExe = Join-Path $publishedExtracted 'SwirPhotoClean/SwirPhotoClean.exe'
           if (-not (Test-Path $publishedExe)) { throw 'Published release archive is missing SwirPhotoClean.exe' }
+          if ($hasReleaseEvidence) {
+            $publishedEmbeddedEvidence = Join-Path $publishedExtracted 'SwirPhotoClean/RELEASE_EVIDENCE.json'
+            if (-not (Test-Path $publishedEmbeddedEvidence)) { throw 'Published qualified release archive is missing RELEASE_EVIDENCE.json' }
+            python tools/release_evidence.py verify --file $publishedEmbeddedEvidence
+            if ($LASTEXITCODE -ne 0) { throw 'Published embedded runtime evidence is invalid' }
+          }
           $publishedReport = Join-Path $PWD 'published-release-smoke.json'
           $process = Start-Process -FilePath $publishedExe -ArgumentList '--self-test', $publishedReport -WindowStyle Hidden -PassThru
           if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Published release self-test timed out' }
