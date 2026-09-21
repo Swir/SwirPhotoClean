@@ -33,6 +33,7 @@ if __name__ == "__main__":
         "--recycle-restore-prepare",
         "--recycle-restore-move",
         "--recycle-restore-status",
+        "--recycle-restore-review",
         "--recycle-restore-verify",
     }:
         from photoclean.recycle_evidence import cli_main

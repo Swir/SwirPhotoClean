@@ -13,6 +13,7 @@ from photoclean.recycle_evidence import (
     create_restore_evidence,
     move_restore_evidence,
     prepare_restore_evidence,
+    validate_restore_evidence_report,
     verify_restore_evidence,
 )
 
@@ -40,6 +41,10 @@ class RecycleEvidenceCliTests(unittest.TestCase):
             self.assertFalse(payload["acceptance_gate_closed"])
             self.assertEqual(payload["inspection"]["stage"], "restored-verified")
             self.assertTrue(payload["inspection"]["valid"])
+
+            reviewed, reviewed_report = validate_restore_evidence_report(report)
+            self.assertEqual(reviewed.manifest, verified.manifest)
+            self.assertEqual(reviewed_report, report)
 
     def test_verify_can_resume_report_export_after_post_transition_failure(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -136,15 +141,82 @@ class RecycleEvidenceCliTests(unittest.TestCase):
             shutil.copy2(recycled.original, recycled.copy)
             verified, report = verify_restore_evidence(recycled.manifest)
             before_verified = verified.manifest.read_text(encoding="utf-8")
+            before_report = report.read_text(encoding="utf-8")
             stream = io.StringIO()
             with redirect_stdout(stream):
                 exit_code = cli_main(["--recycle-restore-status", str(verified.manifest)])
             self.assertEqual(exit_code, 0)
             self.assertIn("EVIDENCE_VALID stage=restored-verified", stream.getvalue())
             self.assertIn("REPORT_PRESENT=yes", stream.getvalue())
+            self.assertIn("REPORT_VALID=yes", stream.getvalue())
+            self.assertIn("--recycle-restore-review", stream.getvalue())
             self.assertIn("READY_FOR_REVIEW", stream.getvalue())
             self.assertTrue(report.is_file())
             self.assertEqual(verified.manifest.read_text(encoding="utf-8"), before_verified)
+            self.assertEqual(report.read_text(encoding="utf-8"), before_report)
+
+    def test_report_review_command_is_read_only_and_prints_acceptance_handoff(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def fake_recycler(path):
+                Path(path).unlink()
+
+            recycled = prepare_restore_evidence(folder, recycler=fake_recycler)
+            shutil.copy2(recycled.original, recycled.copy)
+            verified, report = verify_restore_evidence(recycled.manifest)
+            before_manifest = verified.manifest.read_text(encoding="utf-8")
+            before_report = report.read_text(encoding="utf-8")
+
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                exit_code = cli_main(["--recycle-restore-review", str(report)])
+
+            output = stream.getvalue()
+            self.assertEqual(exit_code, 0)
+            self.assertIn("REPORT_VALID", output)
+            self.assertIn("EVIDENCE_STAGE=restored-verified", output)
+            self.assertIn("READY_FOR_MANUAL_ACCEPTANCE_REVIEW", output)
+            self.assertEqual(verified.manifest.read_text(encoding="utf-8"), before_manifest)
+            self.assertEqual(report.read_text(encoding="utf-8"), before_report)
+
+    def test_tampered_report_is_not_marked_ready_for_review(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def fake_recycler(path):
+                Path(path).unlink()
+
+            recycled = prepare_restore_evidence(folder, recycler=fake_recycler)
+            shutil.copy2(recycled.original, recycled.copy)
+            verified, report = verify_restore_evidence(recycled.manifest)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            payload["inspection"]["copy_matches"] = False
+            report.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            with self.assertRaises(RecycleVerificationError):
+                validate_restore_evidence_report(report)
+
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                exit_code = cli_main(["--recycle-restore-status", str(verified.manifest)])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("EVIDENCE_FAILED", stream.getvalue())
+            self.assertNotIn("READY_FOR_REVIEW", stream.getvalue())
+
+    def test_report_cannot_claim_acceptance_gate_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def fake_recycler(path):
+                Path(path).unlink()
+
+            recycled = prepare_restore_evidence(folder, recycler=fake_recycler)
+            shutil.copy2(recycled.original, recycled.copy)
+            _verified, report = verify_restore_evidence(recycled.manifest)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            payload["acceptance_gate_closed"] = True
+            report.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                exit_code = cli_main(["--recycle-restore-review", str(report)])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("must not claim", stream.getvalue())
 
     def test_verify_refuses_missing_manual_restore(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -159,6 +231,7 @@ class RecycleEvidenceCliTests(unittest.TestCase):
         self.assertEqual(cli_main(["--recycle-restore-verify"]), 2)
         self.assertEqual(cli_main(["--recycle-restore-move"]), 2)
         self.assertEqual(cli_main(["--recycle-restore-status"]), 2)
+        self.assertEqual(cli_main(["--recycle-restore-review"]), 2)
         self.assertEqual(
             cli_main(["--recycle-restore-prepare", "one", "two"]),
             2,
