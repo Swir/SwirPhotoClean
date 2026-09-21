@@ -99,6 +99,26 @@ The command performs a fresh fixture inspection and requires all of the followin
 
 A valid report prints `REPORT_VALID` and `READY_FOR_MANUAL_ACCEPTANCE_REVIEW`. A stale, edited, mismatched or malformed report returns `EVIDENCE_FAILED`. The command is read-only: it does not move files, rewrite the manifest/report, or change `STATUS.md`.
 
+### Sanitized release attestation
+
+After the physical Windows Restore has really been performed and `--recycle-restore-review` succeeds, create the small commit-safe attestation used by the qualified release gate:
+
+```powershell
+py -3.12 tools\release_evidence.py write `
+  --report "C:\...\recycle-evidence-report.json" `
+  --confirm-manual-restore
+```
+
+This writes repository-root `RELEASE_EVIDENCE.json`. The tool re-runs the live report validator before writing and includes only audit-safe identifiers/hashes, timestamps and explicit pass flags. It does **not** copy local file paths or the generated PNGs into the repository. `--confirm-manual-restore` is deliberately required because code can prove that the generated file disappeared and later returned with the expected SHA-256, but only the person running the Windows test can attest that **Restore** was actually chosen in Windows Recycle Bin.
+
+Validate the sanitized file at any time with:
+
+```powershell
+py -3.12 tools\release_evidence.py verify
+```
+
+For qualified Beta/RC/1.x releases, `tools/release_gate.py` fails closed unless the authoritative acceptance checklist is complete **and** this sanitized evidence contract is valid. Historical/general 0.x preview development remains unaffected. `RELEASE_EVIDENCE.json` is release provenance, not a substitute for the raw local manifest/report review and not permission to mark `STATUS.md` complete by itself.
+
 ### Interrupted report export is recoverable
 
 The `restored-verified` manifest transition is deliberately durable. If verification proves the restore but writing `recycle-evidence-report.json` then fails because of a temporary disk or permission problem, **do not repeat the move/restore cycle** and do not edit the manifest. Run the same `--recycle-restore-verify` command again after fixing the write problem.
@@ -129,7 +149,8 @@ py -3.12 run.py --recycle-restore-review "PATH_TO_recycle-evidence-report.json"
 - The helper never empties Windows Recycle Bin.
 - The helper never performs restore itself; restore remains an explicit Windows action so the acceptance evidence is physical, not simulated.
 - Unit tests use injected temporary-file recyclers only to validate state transitions and failure safety. Those tests cannot close the physical Windows acceptance gate.
+- The sanitized release attestation does not contain or replace raw runtime evidence and can never close the acceptance gate by itself.
 
 ## 1.0 evidence rule
 
-Do **not** change the remaining `[ ]` item in `STATUS.md` merely because unit tests, CI, PyInstaller or packaged self-test pass. It may become `[x]` only after a real Windows release-candidate run reaches `restored-verified`, the generated original is preserved, and the evidence manifest/report are reviewed as genuine move-and-restore evidence. `--recycle-restore-review` is a consistency gate for that review; it is not a substitute for the physical Windows restore.
+Do **not** change the remaining `[ ]` item in `STATUS.md` merely because unit tests, CI, PyInstaller, packaged self-test or `RELEASE_EVIDENCE.json` validation passes. It may become `[x]` only after a real Windows release-candidate run reaches `restored-verified`, the generated original is preserved, and the evidence manifest/report are reviewed as genuine move-and-restore evidence. `--recycle-restore-review` is a consistency gate for that review; it is not a substitute for the physical Windows restore.
