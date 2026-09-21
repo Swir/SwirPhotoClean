@@ -25,6 +25,10 @@ jobs:
         run: python -m compileall -q photoclean tools
       - name: Core and GUI tests
         run: python -m unittest discover -s tests -v
+      - name: Generate exact-head runtime safety contract
+        run: |
+          python tools/safety_contract.py write
+          python tools/safety_contract.py verify
       - name: Build portable app
         run: python -m PyInstaller --noconfirm --clean --windowed --onedir --name SwirPhotoClean --icon assets/SwirPhotoClean.ico --add-data "assets;assets" run.py
       - name: Smoke-test the packaged executable
@@ -36,6 +40,9 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed' }
           $report = Get-Content $reportPath -Raw | ConvertFrom-Json
           if (-not $report.ok) { throw 'Packaged smoke test failed' }
+          if (-not $report.safety_contract_sha256 -or $report.safety_contract_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Packaged safety contract was not verified' }
+          $sourceContract = (Get-Content assets/safety-contract.json -Raw | ConvertFrom-Json).sha256
+          if ($report.safety_contract_sha256 -ne $sourceContract) { throw 'Packaged safety contract differs from exact-head source contract' }
       - name: Smoke-test packaged Portable Mode
         shell: pwsh
         run: |
@@ -48,6 +55,8 @@ jobs:
           if (-not $report.portable_mode_exercised) { throw 'Portable Mode was not exercised' }
           if (-not $report.portable_settings_local) { throw 'Portable settings path is not local to the package data directory' }
           if (-not $report.portable_data_dir_writable) { throw 'Portable data directory was not writable in the packaged smoke test' }
+          $sourceContract = (Get-Content assets/safety-contract.json -Raw | ConvertFrom-Json).sha256
+          if ($report.safety_contract_sha256 -ne $sourceContract) { throw 'Portable package safety contract differs from exact-head source contract' }
       - name: Smoke-test packaged Recycle restore command dispatch
         shell: pwsh
         run: |
@@ -131,6 +140,7 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Release archive self-test failed' }
           $report = Get-Content $prepublishReport -Raw | ConvertFrom-Json
           if (-not $report.ok) { throw 'Release archive self-test report failed' }
+          if ($hasReleaseEvidence -and $report.safety_contract_sha256 -ne (Get-Content $releaseEvidence -Raw | ConvertFrom-Json).safety_contract_sha256) { throw 'Release package safety contract differs from physical runtime evidence' }
 
           $releaseAssets = @($archive, $checksum, $provenance)
           if ($hasReleaseEvidence) {
@@ -191,3 +201,4 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Published release self-test failed' }
           $report = Get-Content $publishedReport -Raw | ConvertFrom-Json
           if (-not $report.ok) { throw 'Published release self-test report failed' }
+          if ($hasReleaseEvidence -and $report.safety_contract_sha256 -ne (Get-Content $publishedEvidence -Raw | ConvertFrom-Json).safety_contract_sha256) { throw 'Published package safety contract differs from physical runtime evidence' }
