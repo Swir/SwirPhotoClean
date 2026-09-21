@@ -28,11 +28,13 @@ class SafetyContractTests(unittest.TestCase):
             "requirements.txt",
             "requirements-build.txt",
             "run.py",
+            "photoclean/__init__.py",
             "photoclean/core.py",
             "photoclean/recycle.py",
             "photoclean/recycle_evidence.py",
             "photoclean/safety_contract.py",
             "photoclean/selftest.py",
+            "photoclean/storage.py",
             "tools/release_evidence.py",
             "tools/release_gate.py",
             "tools/release_provenance.py",
@@ -58,8 +60,14 @@ class SafetyContractTests(unittest.TestCase):
             third = build_source_safety_contract(root)
             self.assertNotEqual(first["sha256"], third["sha256"])
 
-    def test_build_and_provenance_changes_invalidate_contract(self):
-        for relative in ("requirements-build.txt", "photoclean/selftest.py", "tools/release_provenance.py"):
+    def test_build_identity_dispatch_and_provenance_changes_invalidate_contract(self):
+        for relative in (
+            "photoclean/__init__.py",
+            "photoclean/storage.py",
+            "requirements-build.txt",
+            "photoclean/selftest.py",
+            "tools/release_provenance.py",
+        ):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 self._source_tree(root)
