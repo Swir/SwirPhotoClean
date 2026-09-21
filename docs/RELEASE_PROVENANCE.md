@@ -1,4 +1,4 @@
-# Release provenance and post-publication smoke
+# Release provenance and transactional publication
 
 SWIR PhotoClean release publication uses a fail-closed provenance record in addition to the human-readable `.sha256` sidecar.
 
@@ -21,14 +21,17 @@ The Windows release job must complete these steps in order:
 1. consume the already-tested Windows onedir artifact from the exact-head build job;
 2. create the release ZIP and `.sha256` sidecar;
 3. create and verify the provenance manifest;
-4. extract that exact ZIP into a clean directory and run `SwirPhotoClean.exe --self-test` before publication;
+4. extract that exact ZIP into a clean directory and run `SwirPhotoClean.exe --self-test` before any GitHub Release is published;
 5. for a qualified release, require the packaged self-test safety contract to match the reviewed runtime evidence;
-6. publish ZIP + checksum + provenance (and qualified runtime evidence when required) to the matching GitHub Release;
-7. download those public assets again from GitHub;
-8. re-check the public checksum, provenance and qualified runtime evidence against the expected version, commit, run ID, channel and safety contract;
-9. extract the downloaded ZIP, run the packaged `--self-test` again and re-check its safety-contract identity.
+6. create the matching GitHub Release as a **draft** and upload ZIP + checksum + provenance (and qualified runtime evidence when required);
+7. download the draft assets again and re-check checksum, provenance, runtime evidence and packaged `--self-test` while the release is still non-public;
+8. publish the verified draft only after the staged asset checks succeed, preserving the `stable` / `prerelease` decision from `tools/release_gate.py`;
+9. download the now-public assets again from GitHub and repeat checksum, provenance, qualified runtime-evidence and packaged `--self-test` verification;
+10. if any post-publication verification step fails, immediately return the release to **draft** and fail the job so an unverified release is not intentionally left public.
 
-A failure at any stage fails the release job. Publication safety still depends on `tools/release_gate.py`: stable 1.x remains blocked until the authoritative `STATUS.md` acceptance gate is complete, and qualified Beta/RC/1.x additionally requires current physical runtime evidence.
+A failure before publication leaves the release as a draft. A failure after publication triggers the rollback-to-draft path before the workflow reports failure. This makes successful completion of the release job mean that the exact public assets—not just the local archive—passed checksum/provenance and packaged runtime smoke verification.
+
+Publication safety still depends on `tools/release_gate.py`: stable 1.x remains blocked until the authoritative `STATUS.md` acceptance gate is complete, and qualified Beta/RC/1.x additionally requires current physical runtime evidence.
 
 ## Manual verification
 
