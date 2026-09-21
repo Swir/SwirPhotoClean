@@ -51,7 +51,7 @@ jobs:
       - name: Smoke-test packaged Recycle restore command dispatch
         shell: pwsh
         run: |
-          foreach ($command in @('--recycle-restore-verify', '--recycle-restore-move', '--recycle-restore-status')) {
+          foreach ($command in @('--recycle-restore-verify', '--recycle-restore-move', '--recycle-restore-status', '--recycle-restore-review')) {
             $process = Start-Process -FilePath dist/SwirPhotoClean/SwirPhotoClean.exe -ArgumentList $command -WindowStyle Hidden -PassThru
             if (-not $process.WaitForExit(30000)) { Stop-Process -Id $process.Id; throw "Packaged Recycle command timed out: $command" }
             if ($process.ExitCode -ne 2) { throw "Expected safe argument-validation exit code 2 for $command, got $($process.ExitCode)" }

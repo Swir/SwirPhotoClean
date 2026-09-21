@@ -53,9 +53,9 @@ The command validates the manifest fingerprint, ordered event log and current ge
 
 - `prepared` → retry the guarded move with `--recycle-restore-move`,
 - `recycled` → restore `RECYCLE-ME.png` in Windows and run `--recycle-restore-verify`,
-- `restored-verified` → report whether `recycle-evidence-report.json` exists and whether the session is ready for human review.
+- `restored-verified` → validate `recycle-evidence-report.json` against a fresh inspection and show the final read-only review command.
 
-The status command is read-only. An inconsistent/tampered session returns `EVIDENCE_FAILED` instead of guessing or repairing evidence.
+The status command is read-only. An inconsistent/tampered session or stale/tampered report returns `EVIDENCE_FAILED` instead of guessing, repairing evidence or printing `READY_FOR_REVIEW`.
 
 ## Manual Windows restore
 
@@ -82,6 +82,23 @@ Successful verification requires:
 
 The command then records stage `restored-verified` and writes `recycle-evidence-report.json` beside the manifest. That report deliberately contains `acceptance_gate_closed: false`; repository status changes still require review of real Windows evidence.
 
+### Final read-only report review
+
+Before changing the remaining 1.0 acceptance checkbox, validate the exported report against the **current** tamper-evident manifest and generated files:
+
+```powershell
+.\SwirPhotoClean.exe --recycle-restore-review "C:\...\recycle-evidence-report.json"
+```
+
+The command performs a fresh fixture inspection and requires all of the following:
+
+- the live manifest is still valid and still at `restored-verified`,
+- the exported report still says `acceptance_gate_closed: false`,
+- the report’s embedded manifest exactly matches the live manifest,
+- the report’s embedded inspection exactly matches a newly computed inspection of both generated files.
+
+A valid report prints `REPORT_VALID` and `READY_FOR_MANUAL_ACCEPTANCE_REVIEW`. A stale, edited, mismatched or malformed report returns `EVIDENCE_FAILED`. The command is read-only: it does not move files, rewrite the manifest/report, or change `STATUS.md`.
+
 ### Interrupted report export is recoverable
 
 The `restored-verified` manifest transition is deliberately durable. If verification proves the restore but writing `recycle-evidence-report.json` then fails because of a temporary disk or permission problem, **do not repeat the move/restore cycle** and do not edit the manifest. Run the same `--recycle-restore-verify` command again after fixing the write problem.
@@ -97,6 +114,7 @@ py -3.12 run.py --recycle-restore-prepare
 py -3.12 run.py --recycle-restore-status "PATH_TO_recycle-verification.json"
 py -3.12 run.py --recycle-restore-move "PATH_TO_recycle-verification.json"
 py -3.12 run.py --recycle-restore-verify "PATH_TO_recycle-verification.json"
+py -3.12 run.py --recycle-restore-review "PATH_TO_recycle-evidence-report.json"
 ```
 
 ## Safety boundaries
@@ -106,11 +124,12 @@ py -3.12 run.py --recycle-restore-verify "PATH_TO_recycle-verification.json"
 - There is no `unlink`/permanent-delete fallback in the production move path.
 - Local fixed-drive restrictions remain enforced by `photoclean.recycle`.
 - A move retry revalidates the original/copy contents and requires the manifest to remain at `prepared`.
-- The status command is read-only and cannot advance stages.
+- The status and report-review commands are read-only and cannot advance stages.
+- A present report is not considered review-ready until it matches the live manifest and a fresh file inspection.
 - The helper never empties Windows Recycle Bin.
 - The helper never performs restore itself; restore remains an explicit Windows action so the acceptance evidence is physical, not simulated.
 - Unit tests use injected temporary-file recyclers only to validate state transitions and failure safety. Those tests cannot close the physical Windows acceptance gate.
 
 ## 1.0 evidence rule
 
-Do **not** change the remaining `[ ]` item in `STATUS.md` merely because unit tests, CI, PyInstaller or packaged self-test pass. It may become `[x]` only after a real Windows release-candidate run reaches `restored-verified`, the generated original is preserved, and the evidence manifest/report are reviewed as genuine move-and-restore evidence.
+Do **not** change the remaining `[ ]` item in `STATUS.md` merely because unit tests, CI, PyInstaller or packaged self-test pass. It may become `[x]` only after a real Windows release-candidate run reaches `restored-verified`, the generated original is preserved, and the evidence manifest/report are reviewed as genuine move-and-restore evidence. `--recycle-restore-review` is a consistency gate for that review; it is not a substitute for the physical Windows restore.
