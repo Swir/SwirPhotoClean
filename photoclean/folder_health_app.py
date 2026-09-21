@@ -11,15 +11,22 @@ import tkinter as tk
 from .compare_insights_gui import PhotoCleanApp as ReviewPhotoCleanApp
 from .diagnostics_plus_gui import EnhancedDiagnosticsWindow
 from .folder_health_gui import FolderHealthWindow, health_tr
-from .windows_ui import apply_windows_chrome, configure_process_dpi_awareness
+from .modern_theme import install_modern_theme
+from .windows_ui import configure_process_dpi_awareness, install_windows_chrome_tracking
 
 
 class PhotoCleanApp(ReviewPhotoCleanApp):
-    """Final app with Folder Health and structured Diagnostics Center."""
+    """Final app with Folder Health, Diagnostics and final visual polish."""
 
     def __init__(self, root, settings_path=None):
         self.folder_health_view = None
         super().__init__(root, settings_path)
+
+    def _build(self, root):
+        # The base UI owns layout/behavior. Apply final theme tokens afterwards
+        # so every language rebuild keeps the same flat Windows 11 presentation.
+        super()._build(root)
+        install_modern_theme(root)
 
     def _install_session_menu(self):
         # Base code owns the menu bar and recreates it on language changes. By
@@ -74,5 +81,7 @@ def main(settings_path=None):
 
     root = tk.Tk()
     PhotoCleanApp(root, settings_path=settings_path)
-    apply_windows_chrome(root)
+    # Keep native dark title-bar/rounded-corner treatment on the main window and
+    # lazily created feature windows without adding Windows dependencies there.
+    install_windows_chrome_tracking(root)
     root.mainloop()

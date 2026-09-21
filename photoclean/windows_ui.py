@@ -121,3 +121,40 @@ def apply_windows_chrome(root) -> bool:
         pass
 
     return applied
+
+
+def install_windows_chrome_tracking(root) -> bool:
+    """Apply native chrome to the root and future Tk top-level windows.
+
+    Feature windows are created lazily throughout a review session. A single
+    global Map binding keeps Folder Health, Diagnostics, fullscreen comparison
+    and other top-level windows visually consistent without coupling those
+    feature modules to Windows APIs. The binding is idempotent and cosmetic
+    failures are ignored.
+    """
+
+    if os.name != "nt":
+        return False
+
+    apply_windows_chrome(root)
+    if getattr(root, "_swir_windows_chrome_tracking", False):
+        return True
+
+    def _on_map(event) -> None:
+        widget = getattr(event, "widget", None)
+        if widget is None:
+            return
+        try:
+            if widget.winfo_toplevel() is widget:
+                apply_windows_chrome(widget)
+        except Exception:
+            # This callback must never turn a cosmetic DWM failure into an
+            # application/runtime failure.
+            return
+
+    try:
+        root.bind_all("<Map>", _on_map, add="+")
+    except Exception:
+        return False
+    setattr(root, "_swir_windows_chrome_tracking", True)
+    return True

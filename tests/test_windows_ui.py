@@ -7,6 +7,19 @@ from unittest import mock
 from photoclean import windows_ui
 
 
+class _TrackedWindow:
+    def __init__(self, top=None):
+        self._top = self if top is None else top
+        self.bindings = []
+        self._swir_windows_chrome_tracking = False
+
+    def winfo_toplevel(self):
+        return self._top
+
+    def bind_all(self, sequence, callback, add=None):
+        self.bindings.append((sequence, callback, add))
+
+
 class WindowsUiTests(unittest.TestCase):
     def test_non_windows_dpi_bootstrap_is_noop(self):
         with mock.patch.object(windows_ui.os, "name", "posix"):
@@ -95,6 +108,43 @@ class WindowsUiTests(unittest.TestCase):
         with mock.patch.object(windows_ui.os, "name", "posix"):
             self.assertFalse(windows_ui.apply_windows_chrome(root))
         root.update_idletasks.assert_not_called()
+
+    def test_chrome_tracking_styles_future_toplevels_once(self):
+        root = _TrackedWindow()
+        child = _TrackedWindow(top=root)
+        feature_window = _TrackedWindow()
+
+        with (
+            mock.patch.object(windows_ui.os, "name", "nt"),
+            mock.patch.object(windows_ui, "apply_windows_chrome", return_value=True) as apply,
+        ):
+            self.assertTrue(windows_ui.install_windows_chrome_tracking(root))
+            self.assertEqual(len(root.bindings), 1)
+            self.assertEqual(root.bindings[0][0], "<Map>")
+            self.assertEqual(root.bindings[0][2], "+")
+
+            callback = root.bindings[0][1]
+            callback(SimpleNamespace(widget=child))
+            self.assertEqual(apply.call_count, 1)
+
+            callback(SimpleNamespace(widget=feature_window))
+            self.assertEqual(apply.call_count, 2)
+            apply.assert_called_with(feature_window)
+
+            # Re-installing after a language rebuild must not stack callbacks.
+            self.assertTrue(windows_ui.install_windows_chrome_tracking(root))
+            self.assertEqual(len(root.bindings), 1)
+            self.assertEqual(apply.call_count, 3)
+
+    def test_chrome_tracking_is_noop_off_windows(self):
+        root = _TrackedWindow()
+        with (
+            mock.patch.object(windows_ui.os, "name", "posix"),
+            mock.patch.object(windows_ui, "apply_windows_chrome") as apply,
+        ):
+            self.assertFalse(windows_ui.install_windows_chrome_tracking(root))
+        self.assertEqual(root.bindings, [])
+        apply.assert_not_called()
 
 
 if __name__ == "__main__":
