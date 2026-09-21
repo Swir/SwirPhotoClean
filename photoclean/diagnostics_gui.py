@@ -1,4 +1,4 @@
-"""Diagnostics Center and explicit generated-file Recycle Bin verification UI."""
+"""Diagnostics Center and release-qualified generated-file Recycle Bin verification UI."""
 from __future__ import annotations
 
 import os
@@ -11,13 +11,15 @@ from .diagnostics import (
     RecycleVerification,
     RecycleVerificationError,
     build_diagnostics_snapshot,
-    create_recycle_verification,
     inspect_recycle_support,
-    load_recycle_verification,
-    move_generated_copy_to_recycle,
-    verify_restored_copy,
 )
 from .gui import BG
+from .recycle_evidence import (
+    create_restore_evidence,
+    move_restore_evidence,
+    validate_restore_evidence_report,
+    verify_restore_evidence,
+)
 from .space_hunter_gui import PhotoCleanApp as SpaceHunterPhotoCleanApp
 
 
@@ -51,6 +53,7 @@ DIAG_EN = {
     "Sprawdź przywróconą kopię": "Verify restored copy",
     "Otwórz folder testu": "Open test folder",
     "Kopiuj ścieżkę dowodu": "Copy evidence path",
+    "Kopiuj ścieżkę raportu": "Copy report path",
     "Zamknij": "Close",
     "Wybierz lokalny folder na pliki testowe": "Choose a local folder for generated test files",
     "Test Kosza wymaga lokalnego dysku stałego i dostępnych komponentów Windows.": "The Recycle Bin check requires a local fixed drive and available Windows components.",
@@ -60,11 +63,12 @@ DIAG_EN = {
     "Nie udało się wykonać testu Kosza": "Recycle Bin check failed",
     "Kopia trafiła do Kosza, a oryginał pozostał na miejscu. Teraz przywróć RECYCLE-ME.png ręcznie z Kosza Windows do folderu testowego i kliknij „Sprawdź przywróconą kopię”.": "The copy reached the Recycle Bin and the original stayed in place. Restore RECYCLE-ME.png manually from the Windows Recycle Bin to the test folder, then click “Verify restored copy”.",
     "Przywracanie potwierdzone": "Restore verified",
-    "Potwierdzono przywrócenie identycznej kopii SHA-256 przy zachowaniu oryginału. Lokalny dowód: {v0}": "Verified restoration of the identical SHA-256 copy while preserving the original. Local evidence: {v0}",
+    "Raport dowodu gotowy: {v0}": "Evidence report ready: {v0}",
+    "Potwierdzono przywrócenie identycznej kopii SHA-256 przy zachowaniu oryginału. Raport dowodu został ponownie zweryfikowany i jest gotowy do ręcznego przeglądu akceptacyjnego: {v0}": "Verified restoration of the identical SHA-256 copy while preserving the original. The evidence report was freshly validated and is ready for manual acceptance review: {v0}",
     "Brak aktywnego testu Kosza.": "No active Recycle Bin verification.",
     "Nie można otworzyć folderu": "Cannot open folder",
     "Brak ostrzeżeń z bieżącego skanu.": "No warnings from the current scan.",
-    "Lokalny dowód nie zmienia automatycznie checklisty repozytorium. Po potwierdzeniu należy zweryfikować plik manifestu przed zamknięciem bramki 1.0.": "Local evidence does not automatically change the repository checklist. The manifest must be reviewed before closing the 1.0 gate.",
+    "Lokalny dowód nie zmienia automatycznie checklisty repozytorium. Ten przebieg jest wiązany z bieżącym kontraktem bezpieczeństwa wydania; po ręcznym Restore program tworzy i ponownie weryfikuje raport przed przeglądem bramki 1.0.": "Local evidence never changes the repository checklist automatically. This run is bound to the current release safety contract; after manual Restore the app creates and freshly validates the report before 1.0 gate review.",
 }
 
 
@@ -74,12 +78,13 @@ def diag_tr(message, **values):
 
 
 class DiagnosticsWindow:
-    """Read-only status plus an explicit generated-file restore verification flow."""
+    """Read-only status plus an explicit, release-qualified restore verification flow."""
 
     def __init__(self, app: "PhotoCleanApp"):
         self.app = app
         self.snapshot = build_diagnostics_snapshot(app.result, len(app.marked))
         self.check: RecycleVerification | None = None
+        self.evidence_report: Path | None = None
 
         self.window = tk.Toplevel(app.root)
         self.window.title(diag_tr("Centrum diagnostyki"))
@@ -142,7 +147,7 @@ class DiagnosticsWindow:
         ttk.Label(
             parent,
             text=diag_tr(
-                "Lokalny dowód nie zmienia automatycznie checklisty repozytorium. Po potwierdzeniu należy zweryfikować plik manifestu przed zamknięciem bramki 1.0."
+                "Lokalny dowód nie zmienia automatycznie checklisty repozytorium. Ten przebieg jest wiązany z bieżącym kontraktem bezpieczeństwa wydania; po ręcznym Restore program tworzy i ponownie weryfikuje raport przed przeglądem bramki 1.0."
             ),
             wraplength=820,
         ).pack(anchor="w", pady=(0, 10))
@@ -203,15 +208,16 @@ class DiagnosticsWindow:
             )
             return
         try:
-            self.check = create_recycle_verification(base)
+            self.check = create_restore_evidence(base)
         except (OSError, RecycleVerificationError) as error:
             messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
             return
+        self.evidence_report = None
         self.recycle_status.set(diag_tr("Przygotowano test w: {v0}", v0=self.check.folder))
         self.move_button.configure(state="normal")
         self.verify_button.configure(state="disabled")
         self.open_button.configure(state="normal")
-        self.copy_button.configure(state="normal")
+        self.copy_button.configure(text=diag_tr("Kopiuj ścieżkę dowodu"), state="normal")
 
     def move_check(self):
         if self.check is None:
@@ -225,7 +231,7 @@ class DiagnosticsWindow:
         ):
             return
         try:
-            self.check = move_generated_copy_to_recycle(self.check)
+            self.check = move_restore_evidence(self.check.manifest)
         except (OSError, RecycleVerificationError) as error:
             messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
             return
@@ -241,15 +247,23 @@ class DiagnosticsWindow:
         if self.check is None:
             return
         try:
-            self.check = verify_restored_copy(self.check)
+            verified, report = verify_restore_evidence(self.check.manifest)
+            validate_restore_evidence_report(report, manifest=verified.manifest)
         except (OSError, RecycleVerificationError) as error:
             messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
             return
+
+        self.check = verified
+        self.evidence_report = report
         self.verify_button.configure(state="disabled")
-        self.recycle_status.set(diag_tr("Przywracanie potwierdzone"))
+        self.copy_button.configure(text=diag_tr("Kopiuj ścieżkę raportu"), state="normal")
+        self.recycle_status.set(diag_tr("Raport dowodu gotowy: {v0}", v0=report))
         messagebox.showinfo(
             diag_tr("Przywracanie potwierdzone"),
-            diag_tr("Potwierdzono przywrócenie identycznej kopii SHA-256 przy zachowaniu oryginału. Lokalny dowód: {v0}", v0=self.check.manifest),
+            diag_tr(
+                "Potwierdzono przywrócenie identycznej kopii SHA-256 przy zachowaniu oryginału. Raport dowodu został ponownie zweryfikowany i jest gotowy do ręcznego przeglądu akceptacyjnego: {v0}",
+                v0=report,
+            ),
             parent=self.window,
         )
 
@@ -266,12 +280,9 @@ class DiagnosticsWindow:
     def copy_evidence_path(self):
         if self.check is None:
             return
-        try:
-            self.check = load_recycle_verification(self.check.manifest)
-        except RecycleVerificationError:
-            pass
+        target = self.evidence_report if self.evidence_report is not None else self.check.manifest
         self.app.root.clipboard_clear()
-        self.app.root.clipboard_append(str(self.check.manifest))
+        self.app.root.clipboard_append(str(target))
 
 
 class PhotoCleanApp(SpaceHunterPhotoCleanApp):
