@@ -4,7 +4,9 @@ SWIR PhotoClean binds the physical Windows Recycle Bin move/Restore evidence to 
 
 ## What is bound
 
-`photoclean/safety_contract.py` defines the explicit safety-critical file set. It includes the cleanup/revalidation path, Recycle backend, generated evidence adapter, release-evidence/gate code, runtime launcher, dependency declaration and Windows workflow. The contract is deterministic: every required path contributes its path, size and SHA-256 to one final SHA-256 digest.
+`photoclean/safety_contract.py` defines the explicit safety-critical file set. It includes the cleanup/revalidation path, Recycle backend, generated evidence adapter, runtime launcher, runtime self-test, release-evidence/gate/provenance code, runtime dependencies, pinned build dependencies and the Windows workflow. The contract is deterministic: every required path contributes its path, size and SHA-256 to one final SHA-256 digest.
+
+Build-tool and verification changes intentionally invalidate qualified physical evidence too. In particular, changing `requirements-build.txt`, `photoclean/selftest.py` or `tools/release_provenance.py` now changes the safety-contract digest, so evidence cannot silently survive a PyInstaller/build-recipe change, a packaged self-test change or a release-provenance verifier change.
 
 The generated `assets/safety-contract.json` is a build artifact, not a source of truth. Windows CI creates it from the exact PR/main head immediately before PyInstaller, verifies it against the checkout and packages it through the existing `assets` bundle. `SwirPhotoClean.exe --self-test` reads that bundled contract and reports the digest; CI requires it to match the exact-head source contract.
 

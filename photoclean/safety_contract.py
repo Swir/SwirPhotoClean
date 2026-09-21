@@ -21,15 +21,18 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SAFETY_CONTRACT_FILES = (
     ".github/workflows/windows.yml",
     "requirements.txt",
+    "requirements-build.txt",
     "run.py",
     "photoclean/core.py",
     "photoclean/diagnostics.py",
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
     "photoclean/safety_contract.py",
+    "photoclean/selftest.py",
     "photoclean/selftest_performance.py",
     "tools/release_evidence.py",
     "tools/release_gate.py",
+    "tools/release_provenance.py",
     "tools/safety_contract.py",
 )
 
