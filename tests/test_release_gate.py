@@ -14,7 +14,7 @@ from photoclean.safety_contract import source_safety_contract_sha256
 
 def valid_runtime_evidence():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "windows-recycle-restore",
         "session_id": "a" * 32,
         "fixture_sha256": "b" * 64,
@@ -28,6 +28,7 @@ def valid_runtime_evidence():
         "original_preserved": True,
         "restored_copy_sha256_verified": True,
         "report_review_valid": True,
+        "windows_packaged_runtime_confirmed": True,
         "acceptance_gate_closed": False,
     }
 
@@ -83,6 +84,7 @@ class ReleaseGateTests(unittest.TestCase):
             validated["safety_contract_sha256"],
             source_safety_contract_sha256(),
         )
+        self.assertTrue(validated["windows_packaged_runtime_confirmed"])
         self.assertFalse(validated["acceptance_gate_closed"])
 
     def test_runtime_evidence_required_flags_fail_closed(self):
@@ -92,6 +94,7 @@ class ReleaseGateTests(unittest.TestCase):
             "original_preserved",
             "restored_copy_sha256_verified",
             "report_review_valid",
+            "windows_packaged_runtime_confirmed",
         ):
             with self.subTest(field=field):
                 payload = valid_runtime_evidence()

@@ -18,7 +18,7 @@ from photoclean.safety_contract import (  # noqa: E402
 )
 
 RELEASE_EVIDENCE_PATH = ROOT / "RELEASE_EVIDENCE.json"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 EVIDENCE_KIND = "windows-recycle-restore"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -28,6 +28,7 @@ _REQUIRED_TRUE_FLAGS = (
     "original_preserved",
     "restored_copy_sha256_verified",
     "report_review_valid",
+    "windows_packaged_runtime_confirmed",
 )
 _REQUIRED_KEYS = {
     "schema_version",
@@ -65,6 +66,31 @@ def _current_safety_contract() -> str:
         return source_safety_contract_sha256(ROOT)
     except SafetyContractError as error:
         raise ReleaseEvidenceError(f"cannot evaluate current release safety contract: {error}") from error
+
+
+def _require_windows_packaged_runtime(manifest: dict) -> None:
+    """Require physical acceptance evidence to originate from the frozen Windows app."""
+    environment = manifest.get("environment")
+    if not isinstance(environment, dict):
+        raise ReleaseEvidenceError(
+            "validated report is missing the runtime environment identity"
+        )
+
+    if environment.get("frozen") is not True:
+        raise ReleaseEvidenceError(
+            "qualified release evidence must be produced by packaged SwirPhotoClean.exe, "
+            "not a source/interpreter run"
+        )
+
+    platform_text = environment.get("platform")
+    if (
+        not isinstance(platform_text, str)
+        or not platform_text.strip()
+        or not platform_text.strip().lower().startswith("windows")
+    ):
+        raise ReleaseEvidenceError(
+            "qualified release evidence must be produced on a real Windows runtime"
+        )
 
 
 def validate_release_evidence(payload: object) -> dict:
@@ -185,6 +211,8 @@ def build_release_evidence(
     if not isinstance(manifest, dict) or not isinstance(inspection, dict):
         raise ReleaseEvidenceError("validated report is missing manifest or inspection data")
 
+    _require_windows_packaged_runtime(manifest)
+
     safety_contract = manifest.get("safety_contract_sha256")
     if not isinstance(safety_contract, str) or not _HEX64.fullmatch(safety_contract):
         raise ReleaseEvidenceError(
@@ -235,6 +263,7 @@ def build_release_evidence(
         "original_preserved": True,
         "restored_copy_sha256_verified": True,
         "report_review_valid": True,
+        "windows_packaged_runtime_confirmed": True,
         "acceptance_gate_closed": False,
     }
     return validate_release_evidence(payload)

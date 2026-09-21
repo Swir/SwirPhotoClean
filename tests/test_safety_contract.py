@@ -22,6 +22,24 @@ class SafetyContractTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"fixture-{index}\n", encoding="utf-8")
 
+    def test_contract_covers_runtime_build_and_release_verification_path(self):
+        required = {
+            ".github/workflows/windows.yml",
+            "requirements.txt",
+            "requirements-build.txt",
+            "run.py",
+            "photoclean/core.py",
+            "photoclean/recycle.py",
+            "photoclean/recycle_evidence.py",
+            "photoclean/safety_contract.py",
+            "photoclean/selftest.py",
+            "tools/release_evidence.py",
+            "tools/release_gate.py",
+            "tools/release_provenance.py",
+            "tools/safety_contract.py",
+        }
+        self.assertEqual(required - set(SAFETY_CONTRACT_FILES), set())
+
     def test_source_contract_is_deterministic_and_changes_with_safety_file(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -39,6 +57,17 @@ class SafetyContractTests(unittest.TestCase):
             changed.write_text("changed safety behavior\n", encoding="utf-8")
             third = build_source_safety_contract(root)
             self.assertNotEqual(first["sha256"], third["sha256"])
+
+    def test_build_and_provenance_changes_invalidate_contract(self):
+        for relative in ("requirements-build.txt", "photoclean/selftest.py", "tools/release_provenance.py"):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self._source_tree(root)
+                before = build_source_safety_contract(root)["sha256"]
+                target = root / relative
+                target.write_text(target.read_text(encoding="utf-8") + "changed\n", encoding="utf-8")
+                after = build_source_safety_contract(root)["sha256"]
+                self.assertNotEqual(before, after)
 
     def test_validation_rejects_tampered_digest_and_stale_source(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from photoclean.diagnostics import _atomic_write_json
 from tools.release_evidence import (
     ReleaseEvidenceError,
     build_release_evidence,
@@ -19,13 +20,26 @@ from photoclean.safety_contract import source_safety_contract_sha256
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
-    def _verified_report(self, folder: str):
+    def _verified_report(
+        self,
+        folder: str,
+        *,
+        frozen: bool = True,
+        platform_name: str = "Windows-11-10.0.26100-SP0",
+    ):
         def fake_recycler(path):
             Path(path).unlink()
 
         recycled = prepare_restore_evidence(folder, recycler=fake_recycler)
         shutil.copy2(recycled.original, recycled.copy)
-        verified, report = verify_restore_evidence(recycled.manifest)
+        verified, _report = verify_restore_evidence(recycled.manifest)
+
+        manifest = json.loads(verified.manifest.read_text(encoding="utf-8"))
+        manifest["environment"]["frozen"] = frozen
+        manifest["environment"]["platform"] = platform_name
+        _atomic_write_json(verified.manifest, manifest)
+
+        verified, report = verify_restore_evidence(verified.manifest)
         return verified, report
 
     def test_build_requires_explicit_manual_restore_attestation(self):
@@ -37,6 +51,27 @@ class ReleaseEvidenceTests(unittest.TestCase):
                     confirm_manual_restore=False,
                 )
 
+    def test_build_requires_frozen_windows_runtime_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, source_report = self._verified_report(folder, frozen=False)
+            with self.assertRaisesRegex(ReleaseEvidenceError, "packaged SwirPhotoClean.exe"):
+                build_release_evidence(
+                    source_report,
+                    confirm_manual_restore=True,
+                )
+
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, non_windows_report = self._verified_report(
+                folder,
+                frozen=True,
+                platform_name="Linux-6.8.0",
+            )
+            with self.assertRaisesRegex(ReleaseEvidenceError, "real Windows runtime"):
+                build_release_evidence(
+                    non_windows_report,
+                    confirm_manual_restore=True,
+                )
+
     def test_build_sanitizes_validated_report_into_commit_safe_contract(self):
         with tempfile.TemporaryDirectory() as folder:
             verified, report = self._verified_report(folder)
@@ -45,7 +80,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 confirm_manual_restore=True,
             )
 
-            self.assertEqual(payload["schema_version"], 2)
+            self.assertEqual(payload["schema_version"], 3)
             self.assertEqual(payload["kind"], "windows-recycle-restore")
             self.assertEqual(payload["session_id"], verified.session_id)
             self.assertEqual(payload["fixture_sha256"], verified.digest)
@@ -63,6 +98,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertTrue(payload["original_preserved"])
             self.assertTrue(payload["restored_copy_sha256_verified"])
             self.assertTrue(payload["report_review_valid"])
+            self.assertTrue(payload["windows_packaged_runtime_confirmed"])
             self.assertFalse(payload["acceptance_gate_closed"])
 
             serialized = json.dumps(payload)
@@ -86,6 +122,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 loaded["safety_contract_sha256"],
                 source_safety_contract_sha256(),
             )
+            self.assertTrue(loaded["windows_packaged_runtime_confirmed"])
             self.assertFalse(loaded["acceptance_gate_closed"])
 
     def test_tampered_report_is_rejected_before_release_attestation(self):
