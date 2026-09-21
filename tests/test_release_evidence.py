@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.release_evidence import (
     ReleaseEvidenceError,
@@ -14,6 +15,7 @@ from photoclean.recycle_evidence import (
     prepare_restore_evidence,
     verify_restore_evidence,
 )
+from photoclean.safety_contract import source_safety_contract_sha256
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
@@ -43,7 +45,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 confirm_manual_restore=True,
             )
 
-            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(payload["schema_version"], 2)
             self.assertEqual(payload["kind"], "windows-recycle-restore")
             self.assertEqual(payload["session_id"], verified.session_id)
             self.assertEqual(payload["fixture_sha256"], verified.digest)
@@ -52,6 +54,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 verified.manifest_fingerprint,
             )
             self.assertEqual(len(payload["evidence_report_sha256"]), 64)
+            self.assertEqual(
+                payload["safety_contract_sha256"],
+                source_safety_contract_sha256(),
+            )
             self.assertTrue(payload["physical_recycle_move_confirmed"])
             self.assertTrue(payload["manual_restore_performed"])
             self.assertTrue(payload["original_preserved"])
@@ -76,6 +82,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertEqual(written, output.resolve())
             loaded = read_release_evidence(written)
             self.assertEqual(loaded["kind"], "windows-recycle-restore")
+            self.assertEqual(
+                loaded["safety_contract_sha256"],
+                source_safety_contract_sha256(),
+            )
             self.assertFalse(loaded["acceptance_gate_closed"])
 
     def test_tampered_report_is_rejected_before_release_attestation(self):
@@ -90,6 +100,19 @@ class ReleaseEvidenceTests(unittest.TestCase):
                     report,
                     confirm_manual_restore=True,
                 )
+
+    def test_stale_safety_contract_cannot_be_promoted_to_release_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_report(folder)
+            with patch(
+                "tools.release_evidence.source_safety_contract_sha256",
+                return_value="f" * 64,
+            ):
+                with self.assertRaisesRegex(ReleaseEvidenceError, "different release safety contract"):
+                    build_release_evidence(
+                        report,
+                        confirm_manual_restore=True,
+                    )
 
 
 if __name__ == "__main__":
