@@ -2,9 +2,11 @@ import unittest
 
 from tools.release_gate import (
     ReleaseGateError,
+    candidate_channel,
     parse_version,
     release_channel,
     runtime_evidence_required,
+    validate_build_candidate,
     validate_qualified_acceptance,
     validate_release_notes,
 )
@@ -50,6 +52,18 @@ class ReleaseGateTests(unittest.TestCase):
     def test_invalid_acceptance_metrics_fail_closed(self):
         with self.assertRaises(ReleaseGateError):
             release_channel("1.0.0", 9, 8)
+
+    def test_build_candidate_allows_final_version_before_physical_evidence(self):
+        validate_build_candidate("1.0.0", 7, 8)
+        self.assertEqual(candidate_channel("1.0.0"), "stable")
+        with self.assertRaisesRegex(ReleaseGateError, "7/8"):
+            release_channel("1.0.0", 7, 8)
+
+    def test_build_candidate_still_rejects_invalid_acceptance_metrics(self):
+        with self.assertRaises(ReleaseGateError):
+            validate_build_candidate("1.0.0", 9, 8)
+        with self.assertRaises(ReleaseGateError):
+            validate_build_candidate("not-semver", 7, 8)
 
     def test_version_is_read_from_project_assignment(self):
         self.assertEqual(parse_version('__version__ = "1.0.0"\n'), "1.0.0")
