@@ -14,6 +14,7 @@ from typing import Callable
 from .diagnostics import (
     RecycleVerification,
     RecycleVerificationError,
+    _atomic_write_json,
     create_recycle_verification,
     export_recycle_evidence,
     inspect_recycle_evidence,
@@ -21,9 +22,11 @@ from .diagnostics import (
     move_generated_copy_to_recycle,
     verify_restored_copy,
 )
+from .safety_contract import SafetyContractError, runtime_safety_contract_sha256
 
 REPORT_NAME = "recycle-evidence-report.json"
 WORKSPACE_NAME = "SwirPhotoClean-Recycle-Restore-Test"
+SAFETY_CONTRACT_FIELD = "safety_contract_sha256"
 
 
 def default_workspace() -> Path:
@@ -33,13 +36,75 @@ def default_workspace() -> Path:
     return base / WORKSPACE_NAME
 
 
+def _read_manifest_payload(check: RecycleVerification) -> dict:
+    try:
+        payload = json.loads(check.manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RecycleVerificationError(
+            f"Cannot read recycle verification manifest: {error}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise RecycleVerificationError("Recycle verification manifest must contain an object")
+    return payload
+
+
+def _runtime_contract_digest() -> str:
+    try:
+        return runtime_safety_contract_sha256()
+    except SafetyContractError as error:
+        raise RecycleVerificationError(f"Release safety contract unavailable: {error}") from error
+
+
+def _bind_runtime_safety_contract(check: RecycleVerification) -> RecycleVerification:
+    """Bind a freshly prepared fixture to the exact runtime/build safety contract."""
+    payload = _read_manifest_payload(check)
+    digest = _runtime_contract_digest()
+    existing = payload.get(SAFETY_CONTRACT_FIELD)
+    if existing is not None and existing != digest:
+        raise RecycleVerificationError(
+            "Recycle verification is already bound to a different release safety contract"
+        )
+    payload[SAFETY_CONTRACT_FIELD] = digest
+    _atomic_write_json(check.manifest, payload)
+    return load_recycle_verification(check.manifest)
+
+
+def _require_runtime_safety_contract(check: RecycleVerification) -> str:
+    """Reject legacy/stale evidence when the running safety-critical code differs."""
+    payload = _read_manifest_payload(check)
+    recorded = payload.get(SAFETY_CONTRACT_FIELD)
+    if (
+        not isinstance(recorded, str)
+        or len(recorded) != 64
+        or recorded != recorded.lower()
+    ):
+        raise RecycleVerificationError(
+            "Recycle verification is not bound to a qualified release safety contract; "
+            "prepare a fresh evidence session with the current build"
+        )
+    try:
+        int(recorded, 16)
+    except ValueError as error:
+        raise RecycleVerificationError(
+            "Recycle verification contains an invalid release safety-contract digest"
+        ) from error
+    current = _runtime_contract_digest()
+    if recorded != current:
+        raise RecycleVerificationError(
+            "Recycle verification belongs to a different release safety contract; "
+            "prepare and physically test a fresh session after safety-critical changes"
+        )
+    return recorded
+
+
 def create_restore_evidence(
     workspace: str | Path | None = None,
 ) -> RecycleVerification:
-    """Create a fresh generated verification fixture without moving any file yet."""
+    """Create a fresh generated fixture bound to the current release safety contract."""
     base = Path(workspace).expanduser().resolve() if workspace is not None else default_workspace()
     base.mkdir(parents=True, exist_ok=True)
-    return create_recycle_verification(base)
+    check = create_recycle_verification(base)
+    return _bind_runtime_safety_contract(check)
 
 
 def move_restore_evidence(
@@ -49,6 +114,7 @@ def move_restore_evidence(
 ) -> RecycleVerification:
     """Retry or perform the guarded Recycle Bin move for an existing prepared fixture."""
     check = load_recycle_verification(Path(manifest).expanduser().resolve())
+    _require_runtime_safety_contract(check)
     return move_generated_copy_to_recycle(check, recycler=recycler)
 
 
@@ -76,6 +142,7 @@ def verify_restore_evidence(
     the report without adding another stage event.
     """
     check = load_recycle_verification(Path(manifest).expanduser().resolve())
+    _require_runtime_safety_contract(check)
     if check.stage == "recycled":
         verified = verify_restored_copy(check)
     elif check.stage == "restored-verified":
@@ -134,6 +201,7 @@ def validate_restore_evidence_report(
         else report.parent / "recycle-verification.json"
     )
     check = load_recycle_verification(manifest_path)
+    _require_runtime_safety_contract(check)
     if check.stage != "restored-verified":
         raise RecycleVerificationError(
             "Recycle evidence report is reviewable only after restored-verified stage"
@@ -184,7 +252,9 @@ def _print_move_success(check: RecycleVerification) -> None:
 
 def _print_status(manifest: str | Path) -> int:
     manifest_path = Path(manifest).expanduser().resolve()
-    inspection = inspect_recycle_evidence(manifest_path)
+    check = load_recycle_verification(manifest_path)
+    _require_runtime_safety_contract(check)
+    inspection = inspect_recycle_evidence(check)
     if not inspection.valid:
         raise RecycleVerificationError(
             "Recycle verification evidence is inconsistent: "
@@ -197,6 +267,7 @@ def _print_status(manifest: str | Path) -> int:
     )
     print(f"ORIGINAL_PRESENT={'yes' if inspection.original_present else 'no'}")
     print(f"COPY_PRESENT={'yes' if inspection.copy_present else 'no'}")
+    print(f"SAFETY_CONTRACT_SHA256={_runtime_contract_digest()}")
 
     if inspection.stage == "prepared":
         print(
@@ -233,6 +304,7 @@ def _print_report_review(report: str | Path) -> int:
     print(f"EVIDENCE_STAGE={check.stage}")
     print(f"SESSION={check.session_id or 'legacy'}")
     print(f"SHA256={check.digest}")
+    print(f"SAFETY_CONTRACT_SHA256={_runtime_contract_digest()}")
     print(f"MANIFEST={check.manifest}")
     print(f"EVIDENCE_REPORT={report_path}")
     print("READY_FOR_MANUAL_ACCEPTANCE_REVIEW")
@@ -299,6 +371,7 @@ def cli_main(argv: tuple[str, ...] | list[str]) -> int:
             print(f"ORIGINAL_PRESERVED path={verified.original}")
             print(f"RESTORED_COPY path={verified.copy}")
             print(f"SHA256={verified.digest}")
+            print(f"SAFETY_CONTRACT_SHA256={_runtime_contract_digest()}")
             print(f"EVIDENCE_REPORT path={report}")
             print(
                 "REVIEW_COMMAND=SwirPhotoClean.exe --recycle-restore-review "

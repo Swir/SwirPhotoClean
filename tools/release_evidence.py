@@ -12,8 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from photoclean.safety_contract import (  # noqa: E402
+    SafetyContractError,
+    source_safety_contract_sha256,
+)
+
 RELEASE_EVIDENCE_PATH = ROOT / "RELEASE_EVIDENCE.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 EVIDENCE_KIND = "windows-recycle-restore"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -31,6 +36,7 @@ _REQUIRED_KEYS = {
     "fixture_sha256",
     "manifest_fingerprint",
     "evidence_report_sha256",
+    "safety_contract_sha256",
     "verified_at_utc",
     "reviewed_at_utc",
     *_REQUIRED_TRUE_FLAGS,
@@ -54,8 +60,15 @@ def _parse_utc(value: object, label: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _current_safety_contract() -> str:
+    try:
+        return source_safety_contract_sha256(ROOT)
+    except SafetyContractError as error:
+        raise ReleaseEvidenceError(f"cannot evaluate current release safety contract: {error}") from error
+
+
 def validate_release_evidence(payload: object) -> dict:
-    """Validate the sanitized, commit-safe release evidence contract."""
+    """Validate sanitized evidence and bind it to the current safety-critical source."""
     if not isinstance(payload, dict):
         raise ReleaseEvidenceError("RELEASE_EVIDENCE.json must contain a JSON object")
 
@@ -82,12 +95,25 @@ def validate_release_evidence(payload: object) -> dict:
     if not isinstance(session_id, str) or not _HEX32.fullmatch(session_id):
         raise ReleaseEvidenceError("session_id must be 32 lowercase hexadecimal characters")
 
-    for field in ("fixture_sha256", "manifest_fingerprint", "evidence_report_sha256"):
+    for field in (
+        "fixture_sha256",
+        "manifest_fingerprint",
+        "evidence_report_sha256",
+        "safety_contract_sha256",
+    ):
         value = payload[field]
         if not isinstance(value, str) or not _HEX64.fullmatch(value):
             raise ReleaseEvidenceError(
                 f"{field} must be 64 lowercase hexadecimal characters"
             )
+
+    current_contract = _current_safety_contract()
+    if payload["safety_contract_sha256"] != current_contract:
+        raise ReleaseEvidenceError(
+            "runtime evidence belongs to a different release safety contract; "
+            "repeat the physical Windows Recycle Bin move/Restore verification "
+            "after safety-critical changes"
+        )
 
     verified_at = _parse_utc(payload["verified_at_utc"], "verified_at_utc")
     reviewed_at = _parse_utc(payload["reviewed_at_utc"], "reviewed_at_utc")
@@ -159,6 +185,17 @@ def build_release_evidence(
     if not isinstance(manifest, dict) or not isinstance(inspection, dict):
         raise ReleaseEvidenceError("validated report is missing manifest or inspection data")
 
+    safety_contract = manifest.get("safety_contract_sha256")
+    if not isinstance(safety_contract, str) or not _HEX64.fullmatch(safety_contract):
+        raise ReleaseEvidenceError(
+            "validated report is not bound to a qualified release safety contract"
+        )
+    current_contract = _current_safety_contract()
+    if safety_contract != current_contract:
+        raise ReleaseEvidenceError(
+            "validated report was produced by a different release safety contract"
+        )
+
     recycled = _event_for(manifest, "recycled")
     restored = _event_for(manifest, "restored-verified")
     if recycled.get("source_absent_after_recycle") is not True:
@@ -190,6 +227,7 @@ def build_release_evidence(
         "fixture_sha256": check.digest,
         "manifest_fingerprint": check.manifest_fingerprint,
         "evidence_report_sha256": hashlib.sha256(raw).hexdigest(),
+        "safety_contract_sha256": safety_contract,
         "verified_at_utc": verified_at,
         "reviewed_at_utc": reviewed_text,
         "physical_recycle_move_confirmed": True,
@@ -256,7 +294,7 @@ def main() -> int:
 
     verifier = subparsers.add_parser(
         "verify",
-        help="validate an existing sanitized release evidence file",
+        help="validate an existing sanitized release evidence file against current safety code",
     )
     verifier.add_argument(
         "--file",
@@ -279,7 +317,8 @@ def main() -> int:
         payload = read_release_evidence(args.file)
         print(
             "RELEASE_EVIDENCE_VALID "
-            f"session={payload['session_id']} sha256={payload['fixture_sha256']}"
+            f"session={payload['session_id']} sha256={payload['fixture_sha256']} "
+            f"safety_contract={payload['safety_contract_sha256']}"
         )
         return 0
     except (OSError, ReleaseEvidenceError) as error:

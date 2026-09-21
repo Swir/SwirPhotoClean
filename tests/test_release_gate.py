@@ -9,16 +9,18 @@ from tools.release_gate import (
     validate_release_notes,
 )
 from tools.release_evidence import ReleaseEvidenceError, validate_release_evidence
+from photoclean.safety_contract import source_safety_contract_sha256
 
 
 def valid_runtime_evidence():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "windows-recycle-restore",
         "session_id": "a" * 32,
         "fixture_sha256": "b" * 64,
         "manifest_fingerprint": "c" * 64,
         "evidence_report_sha256": "d" * 64,
+        "safety_contract_sha256": source_safety_contract_sha256(),
         "verified_at_utc": "2026-09-21T05:00:00+00:00",
         "reviewed_at_utc": "2026-09-21T05:05:00+00:00",
         "physical_recycle_move_confirmed": True,
@@ -77,6 +79,10 @@ class ReleaseGateTests(unittest.TestCase):
     def test_valid_runtime_evidence_contract_is_accepted(self):
         validated = validate_release_evidence(valid_runtime_evidence())
         self.assertEqual(validated["kind"], "windows-recycle-restore")
+        self.assertEqual(
+            validated["safety_contract_sha256"],
+            source_safety_contract_sha256(),
+        )
         self.assertFalse(validated["acceptance_gate_closed"])
 
     def test_runtime_evidence_required_flags_fail_closed(self):
@@ -102,6 +108,14 @@ class ReleaseGateTests(unittest.TestCase):
         payload = valid_runtime_evidence()
         payload["evidence_report_sha256"] = "ABC"
         with self.assertRaises(ReleaseEvidenceError):
+            validate_release_evidence(payload)
+
+    def test_runtime_evidence_rejects_stale_safety_contract(self):
+        payload = valid_runtime_evidence()
+        payload["safety_contract_sha256"] = "0" * 64
+        if payload["safety_contract_sha256"] == source_safety_contract_sha256():
+            payload["safety_contract_sha256"] = "1" * 64
+        with self.assertRaisesRegex(ReleaseEvidenceError, "different release safety contract"):
             validate_release_evidence(payload)
 
     def test_runtime_evidence_review_cannot_predate_verification(self):
