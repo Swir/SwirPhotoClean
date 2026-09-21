@@ -25,13 +25,16 @@ This means an evidence session must be restarted after a safety-critical change.
 
 ## Release evidence
 
-`tools/release_evidence.py` writes schema v2 `RELEASE_EVIDENCE.json`. In addition to the generated fixture/report hashes and explicit manual-Restore attestation, it stores `safety_contract_sha256` and requires that value to match the current source checkout.
+`tools/release_evidence.py` writes schema v3 `RELEASE_EVIDENCE.json`. In addition to the generated fixture/report hashes and explicit manual-Restore attestation, it stores `safety_contract_sha256` and requires that value to match the current source checkout.
 
-Qualified Beta/RC/1.x publication therefore requires all three identities to agree:
+Qualified Beta/RC/1.x evidence is accepted only when the validated report proves it originated from a **frozen Windows runtime**. Source/interpreter runs and non-Windows simulated runs can still exercise lower-level diagnostics/tests, but they cannot be promoted into release evidence. The sanitized release contract records this as `windows_packaged_runtime_confirmed=true`.
+
+Qualified Beta/RC/1.x publication therefore requires all four identities/conditions to agree:
 
 1. the physical Recycle/Restore session's recorded safety contract;
 2. the current release checkout's deterministic safety contract;
-3. the contract embedded in the exact package that passes pre-publication and post-publication `--self-test`.
+3. the contract embedded in the exact package that passes pre-publication and post-publication `--self-test`;
+4. the physical evidence report identifies a packaged `SwirPhotoClean.exe` running on Windows, not a source/interpreter or non-Windows test harness.
 
 The release workflow compares the package self-test contract to the sanitized runtime evidence before publication and repeats the comparison after downloading the public release archive.
 
