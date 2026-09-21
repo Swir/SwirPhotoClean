@@ -12,9 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from photoclean.diagnostics import RecycleVerificationError
-from photoclean.recycle_evidence import validate_restore_evidence_report
-
 RELEASE_EVIDENCE_PATH = ROOT / "RELEASE_EVIDENCE.json"
 SCHEMA_VERSION = 1
 EVIDENCE_KIND = "windows-recycle-restore"
@@ -144,7 +141,13 @@ def build_release_evidence(
             "manual Windows Restore must be explicitly confirmed before release evidence is written"
         )
 
-    check, report = validate_restore_evidence_report(report_path)
+    try:
+        from photoclean.diagnostics import RecycleVerificationError
+        from photoclean.recycle_evidence import validate_restore_evidence_report
+
+        check, report = validate_restore_evidence_report(report_path)
+    except RecycleVerificationError as error:
+        raise ReleaseEvidenceError(f"Recycle evidence report is not release-ready: {error}") from error
     try:
         raw = report.read_bytes()
         source = json.loads(raw.decode("utf-8"))
@@ -279,7 +282,7 @@ def main() -> int:
             f"session={payload['session_id']} sha256={payload['fixture_sha256']}"
         )
         return 0
-    except (OSError, ReleaseEvidenceError, RecycleVerificationError) as error:
+    except (OSError, ReleaseEvidenceError) as error:
         raise SystemExit(f"release evidence failed: {error}") from error
 
 

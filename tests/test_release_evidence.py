@@ -10,7 +10,6 @@ from tools.release_evidence import (
     read_release_evidence,
     write_release_evidence,
 )
-from photoclean.diagnostics import RecycleVerificationError
 from photoclean.recycle_evidence import (
     prepare_restore_evidence,
     verify_restore_evidence,
@@ -86,7 +85,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             payload["inspection"]["copy_matches"] = False
             report.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-            with self.assertRaises(RecycleVerificationError):
+            with self.assertRaises(ReleaseEvidenceError):
                 build_release_evidence(
                     report,
                     confirm_manual_restore=True,
