@@ -19,7 +19,18 @@ A successful final step now uses `photoclean.recycle_evidence`, not the lower-le
 - exported to `recycle-evidence-report.json`;
 - freshly revalidated against the live manifest and both generated files before the GUI reports it ready for acceptance review.
 
-After successful verification, **Copy report path** copies the final report path. Before the report exists, the same button copies the manifest path so a prepared/recycled session can still be inspected or resumed.
+## Resume after restart
+
+The physical Recycle Bin test can now be resumed in the GUI instead of forcing the operator back to CLI helpers after an application restart.
+
+1. Open **Diagnostics Center → Windows Recycle Bin**.
+2. Choose **Resume test from manifest…** and select the generated `recycle-verification.json`.
+3. SwirPhotoClean reloads the tamper-evident manifest and rejects it when its bound release safety-contract SHA-256 does not match the running build.
+4. A `prepared` session re-enables only the guarded move step; a `recycled` session re-enables restore verification; a `restored-verified` session revalidates an existing report or enables safe report regeneration when the report is missing.
+
+Resuming never performs a move, Restore or verification automatically. A `recycled` session remains usable whether `RECYCLE-ME.png` is still in the Windows Recycle Bin or has already been manually restored; the explicit **Verify restored copy** action performs the authoritative file checks.
+
+After successful verification, **Copy report path** copies the final report path. Before the report exists, the same button copies the manifest path so the session can be inspected or resumed again.
 
 ## What this does not do
 
