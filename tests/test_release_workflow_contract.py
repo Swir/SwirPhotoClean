@@ -13,6 +13,24 @@ class ReleaseWorkflowPublicationContractTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_normal_windows_job_uses_candidate_build_gate(self):
+        self.assertIn("python tools/release_gate.py --build-check", self.workflow)
+
+    def test_publication_requires_explicit_token_and_strict_gate(self):
+        self.assertIn(
+            "contains(github.event.head_commit.message, '[publish-release]')",
+            self.workflow,
+        )
+        release_section = self.workflow.split("\n  release:\n", 1)[1]
+        self.assertIn("python tools/release_gate.py --check", release_section)
+        self.assertNotIn(
+            "startsWith(github.event.head_commit.message, 'release:')",
+            release_section,
+        )
+
+    def test_packaged_attestation_dispatch_is_smoke_tested(self):
+        self.assertIn("'--recycle-restore-attest'", self.workflow)
+
     def test_release_assets_are_staged_and_verified_before_publication(self):
         text = self.workflow
         stable_create = (
