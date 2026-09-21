@@ -6,20 +6,27 @@ or invokes file operations.
 """
 from __future__ import annotations
 
-import os
 import tkinter as tk
 
 from .compare_insights_gui import PhotoCleanApp as ReviewPhotoCleanApp
 from .diagnostics_plus_gui import EnhancedDiagnosticsWindow
 from .folder_health_gui import FolderHealthWindow, health_tr
+from .modern_theme import install_modern_theme
+from .windows_ui import configure_process_dpi_awareness, install_windows_chrome_tracking
 
 
 class PhotoCleanApp(ReviewPhotoCleanApp):
-    """Final app with Folder Health and structured Diagnostics Center."""
+    """Final app with Folder Health, Diagnostics and final visual polish."""
 
     def __init__(self, root, settings_path=None):
         self.folder_health_view = None
         super().__init__(root, settings_path)
+
+    def _build(self, root):
+        # The base UI owns layout/behavior. Apply final theme tokens afterwards
+        # so every language rebuild keeps the same flat Windows 11 presentation.
+        super()._build(root)
+        install_modern_theme(root)
 
     def _install_session_menu(self):
         # Base code owns the menu bar and recreates it on language changes. By
@@ -68,13 +75,13 @@ class PhotoCleanApp(ReviewPhotoCleanApp):
 
 
 def main(settings_path=None):
-    if os.name == "nt":
-        import ctypes
+    # DPI mode must be requested before the first Tk window exists. Prefer
+    # per-monitor-v2 on modern Windows and fall back safely on older systems.
+    configure_process_dpi_awareness()
 
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except (AttributeError, OSError):
-            pass
     root = tk.Tk()
     PhotoCleanApp(root, settings_path=settings_path)
+    # Keep native dark title-bar/rounded-corner treatment on the main window and
+    # lazily created feature windows without adding Windows dependencies there.
+    install_windows_chrome_tracking(root)
     root.mainloop()
