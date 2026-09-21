@@ -16,17 +16,26 @@ class ReleaseWorkflowPublicationContractTests(unittest.TestCase):
     def test_normal_windows_job_uses_candidate_build_gate(self):
         self.assertIn("python tools/release_gate.py --build-check", self.workflow)
 
-    def test_publication_requires_explicit_token_and_strict_gate(self):
+    def test_publication_requires_explicit_prefix_and_strict_gate(self):
         self.assertIn(
-            "contains(github.event.head_commit.message, '[publish-release]')",
+            "startsWith(github.event.head_commit.message, '[publish-release] ')",
             self.workflow,
         )
         release_section = self.workflow.split("\n  release:\n", 1)[1]
         self.assertIn("python tools/release_gate.py --check", release_section)
         self.assertNotIn(
+            "contains(github.event.head_commit.message, '[publish-release]')",
+            release_section,
+        )
+        self.assertNotIn(
             "startsWith(github.event.head_commit.message, 'release:')",
             release_section,
         )
+
+    def test_release_trigger_cannot_be_armed_by_token_in_commit_body(self):
+        release_section = self.workflow.split("\n  release:\n", 1)[1]
+        self.assertIn("prefix of the main-branch head commit message", release_section)
+        self.assertIn("merely mentioning it in", release_section)
 
     def test_packaged_attestation_dispatch_is_smoke_tested(self):
         self.assertIn("'--recycle-restore-attest'", self.workflow)

@@ -71,11 +71,10 @@ jobs:
           path: dist/SwirPhotoClean/
           if-no-files-found: error
   release:
-    # GitHub expression string comparisons are case-insensitive, so a PR title
-    # such as "Release: ..." can accidentally match startsWith(..., 'release:')
-    # after squash merge. Publishing therefore requires this explicit token in
-    # the main-branch commit message in addition to every strict release gate.
-    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-release]')
+    # Release publication is an explicit commit-title action. The token must be
+    # the prefix of the main-branch head commit message; merely mentioning it in
+    # a squash body or documentation must never arm the release job.
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[publish-release] ')
     needs: windows
     runs-on: windows-latest
     permissions:
