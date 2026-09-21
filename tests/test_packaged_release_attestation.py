@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -40,16 +40,12 @@ class PackagedReleaseAttestationTests(unittest.TestCase):
 
     def test_packaged_builder_matches_repository_release_schema(self):
         with tempfile.TemporaryDirectory() as folder:
-            _verified, report = self._verified_packaged_report(folder)
-            reviewed_at = datetime(
-                2026,
-                9,
-                21,
-                15,
-                0,
-                0,
-                tzinfo=timezone.utc,
+            verified, report = self._verified_packaged_report(folder)
+            manifest = json.loads(verified.manifest.read_text(encoding="utf-8"))
+            verified_at = datetime.fromisoformat(
+                manifest["verified_at_utc"].replace("Z", "+00:00")
             )
+            reviewed_at = verified_at + timedelta(seconds=1)
 
             repository_payload = build_release_evidence(
                 report,
