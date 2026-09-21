@@ -6,12 +6,12 @@ or invokes file operations.
 """
 from __future__ import annotations
 
-import os
 import tkinter as tk
 
 from .compare_insights_gui import PhotoCleanApp as ReviewPhotoCleanApp
 from .diagnostics_plus_gui import EnhancedDiagnosticsWindow
 from .folder_health_gui import FolderHealthWindow, health_tr
+from .windows_ui import apply_windows_chrome, configure_process_dpi_awareness
 
 
 class PhotoCleanApp(ReviewPhotoCleanApp):
@@ -68,13 +68,11 @@ class PhotoCleanApp(ReviewPhotoCleanApp):
 
 
 def main(settings_path=None):
-    if os.name == "nt":
-        import ctypes
+    # DPI mode must be requested before the first Tk window exists. Prefer
+    # per-monitor-v2 on modern Windows and fall back safely on older systems.
+    configure_process_dpi_awareness()
 
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except (AttributeError, OSError):
-            pass
     root = tk.Tk()
     PhotoCleanApp(root, settings_path=settings_path)
+    apply_windows_chrome(root)
     root.mainloop()
