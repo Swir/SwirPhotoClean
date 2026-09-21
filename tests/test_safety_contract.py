@@ -1,0 +1,89 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from photoclean.safety_contract import (
+    ASSET_NAME,
+    SAFETY_CONTRACT_FILES,
+    SafetyContractError,
+    build_source_safety_contract,
+    runtime_safety_contract,
+    validate_safety_contract,
+    validate_source_safety_contract,
+)
+
+
+class SafetyContractTests(unittest.TestCase):
+    def _source_tree(self, root: Path) -> None:
+        for index, relative in enumerate(SAFETY_CONTRACT_FILES):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fixture-{index}\n", encoding="utf-8")
+
+    def test_source_contract_is_deterministic_and_changes_with_safety_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self._source_tree(root)
+            first = build_source_safety_contract(root)
+            second = build_source_safety_contract(root)
+            self.assertEqual(first, second)
+            self.assertEqual(len(first["sha256"]), 64)
+            self.assertEqual(
+                [item["path"] for item in first["files"]],
+                list(SAFETY_CONTRACT_FILES),
+            )
+
+            changed = root / SAFETY_CONTRACT_FILES[0]
+            changed.write_text("changed safety behavior\n", encoding="utf-8")
+            third = build_source_safety_contract(root)
+            self.assertNotEqual(first["sha256"], third["sha256"])
+
+    def test_validation_rejects_tampered_digest_and_stale_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self._source_tree(root)
+            payload = build_source_safety_contract(root)
+            self.assertEqual(validate_safety_contract(payload), payload)
+            self.assertEqual(validate_source_safety_contract(payload, root), payload)
+
+            tampered = json.loads(json.dumps(payload))
+            tampered["sha256"] = "0" * 64
+            with self.assertRaises(SafetyContractError):
+                validate_safety_contract(tampered)
+
+            (root / SAFETY_CONTRACT_FILES[-1]).write_text("new gate\n", encoding="utf-8")
+            with self.assertRaisesRegex(SafetyContractError, "stale"):
+                validate_source_safety_contract(payload, root)
+
+    def test_missing_required_source_file_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self._source_tree(root)
+            (root / SAFETY_CONTRACT_FILES[2]).unlink()
+            with self.assertRaises(SafetyContractError):
+                build_source_safety_contract(root)
+
+    def test_frozen_runtime_reads_and_validates_bundled_asset(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source"
+            source.mkdir()
+            self._source_tree(source)
+            payload = build_source_safety_contract(source)
+
+            bundle = root / "bundle"
+            asset = bundle / "assets" / ASSET_NAME
+            asset.parent.mkdir(parents=True)
+            asset.write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch("photoclean.safety_contract.sys.frozen", True, create=True), patch(
+                "photoclean.safety_contract.sys._MEIPASS", str(bundle), create=True
+            ):
+                loaded = runtime_safety_contract()
+            self.assertEqual(loaded["sha256"], payload["sha256"])
+
+
+if __name__ == "__main__":
+    unittest.main()
