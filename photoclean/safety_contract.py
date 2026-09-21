@@ -27,8 +27,10 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
     "photoclean/safety_contract.py",
+    "photoclean/selftest_performance.py",
     "tools/release_evidence.py",
     "tools/release_gate.py",
+    "tools/safety_contract.py",
 )
 
 
