@@ -14,6 +14,7 @@ from . import i18n
 from .core import scan
 from .folder_health_app import PhotoCleanApp
 from .insights import folder_health
+from .safety_contract import runtime_safety_contract_sha256
 from .scan_diagnostics import build_scan_diagnostics_report
 from .selftest import run as run_base
 from .session import SessionSnapshot, audit_session_snapshot
@@ -59,6 +60,10 @@ def run(destination, settings_path=None):
     portable_settings_local = False
     portable_data_dir_writable = False
     try:
+        safety_contract_sha256 = runtime_safety_contract_sha256()
+        assert len(safety_contract_sha256) == 64
+        int(safety_contract_sha256, 16)
+
         if portable_mode_exercised:
             portable_settings_local, portable_data_dir_writable = _probe_portable_storage(
                 Path(settings_path)
@@ -174,6 +179,7 @@ def run(destination, settings_path=None):
             portable_mode_exercised=portable_mode_exercised,
             portable_settings_local=portable_settings_local,
             portable_data_dir_writable=portable_data_dir_writable,
+            safety_contract_sha256=safety_contract_sha256,
         )
     except Exception as error:
         report["ok"] = False
