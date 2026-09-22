@@ -391,7 +391,7 @@ def write_release_evidence(
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     _write_validated_atomic_json(output, payload, expected_output_identity)
-    return output
+    return output.resolve()
 
 
 def read_release_evidence(path: str | Path = RELEASE_EVIDENCE_PATH) -> dict:
