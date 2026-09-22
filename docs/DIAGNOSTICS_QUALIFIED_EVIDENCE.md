@@ -30,11 +30,11 @@ The physical Recycle Bin test can be resumed in the GUI instead of forcing the o
 2. Choose **Resume test from manifest…** and select the generated `recycle-verification.json`.
 3. SwirPhotoClean reloads the tamper-evident manifest and rejects it when its bound release safety-contract SHA-256 does not match the running build.
 4. A `prepared` session re-enables only the guarded move step; a `recycled` session re-enables restore verification; a `restored-verified` session revalidates an existing report or enables safe report regeneration when the report is missing.
-5. When a restored session has a freshly validated report, **Create RELEASE_EVIDENCE…** is enabled again. The operator must explicitly reconfirm the manual Restore before a new attestation is written.
+5. When a restored session has a freshly validated report, SwirPhotoClean also checks for an existing `RELEASE_EVIDENCE.json`. If one exists, it is revalidated against the current safety contract **and** cross-checked against the exact resumed session ID, fixture SHA-256, manifest fingerprint and report SHA-256. A matching attestation is adopted without being rewritten and the create button stays disabled. A stale, tampered or unrelated attestation is reported visibly and is never treated as valid evidence. If no attestation exists, **Create RELEASE_EVIDENCE…** remains available and the operator must explicitly reconfirm the manual Restore before creating one.
 
 Resuming never performs a move, Restore, verification or release attestation automatically. A `recycled` session remains usable whether `RECYCLE-ME.png` is still in the Windows Recycle Bin or has already been manually restored; the explicit **Verify restored copy** action performs the authoritative file checks.
 
-Path-copying follows the most advanced validated stage: before the report exists it copies the manifest, after verification it copies `recycle-evidence-report.json`, and after successful packaged attestation it copies `RELEASE_EVIDENCE.json`.
+Path-copying follows the most advanced validated stage: before the report exists it copies the manifest, after verification it copies `recycle-evidence-report.json`, and after successful or safely resumed packaged attestation it copies `RELEASE_EVIDENCE.json`.
 
 ## What this does not do
 
