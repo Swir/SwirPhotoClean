@@ -195,16 +195,11 @@ def build_release_evidence(
 
     try:
         from photoclean.diagnostics import RecycleVerificationError
-        from photoclean.recycle_evidence import validate_restore_evidence_report
+        from photoclean.evidence_snapshot import load_validated_restore_evidence_snapshot
 
-        check, report = validate_restore_evidence_report(report_path)
+        check, report, raw, source = load_validated_restore_evidence_snapshot(report_path)
     except RecycleVerificationError as error:
         raise ReleaseEvidenceError(f"Recycle evidence report is not release-ready: {error}") from error
-    try:
-        raw = report.read_bytes()
-        source = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ReleaseEvidenceError(f"cannot read validated recycle evidence report: {error}") from error
 
     manifest = source.get("manifest")
     inspection = source.get("inspection")
@@ -232,7 +227,7 @@ def build_release_evidence(
         raise ReleaseEvidenceError("recycle event does not prove the generated original was preserved")
     if restored.get("original_preserved") is not True:
         raise ReleaseEvidenceError("restore event does not preserve the generated original")
-    if restored.get("restored_copy_matches_sha256") is not True:
+    if restored.get("restored_copy_sha256") is not True:
         raise ReleaseEvidenceError("restore event does not verify the restored copy SHA-256")
     if restored.get("restored_copy_distinct") is not True:
         raise ReleaseEvidenceError("restore event does not prove the restored copy is physically distinct")
