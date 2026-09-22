@@ -28,6 +28,7 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/diagnostics.py",
     "photoclean/diagnostics_gui.py",
     "photoclean/diagnostics_plus_gui.py",
+    "photoclean/folder_health_app.py",
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
     "photoclean/release_attestation.py",
