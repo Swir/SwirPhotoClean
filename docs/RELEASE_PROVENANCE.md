@@ -14,6 +14,8 @@ The manifest is published as `SwirPhotoClean-<version>-Windows.zip.provenance.js
 
 Qualified Beta/RC/1.x releases add a second, independent binding: the physical Windows Recycle Bin move/Restore evidence records the deterministic release-safety contract from the package that performed the test. `RELEASE_EVIDENCE.json` must carry the same contract as the current release checkout, and the packaged `--self-test` must report that same digest before and after public download. See `docs/RELEASE_SAFETY_CONTRACT.md`.
 
+The packaged attestation handoff is transactional as well. `SwirPhotoClean.exe --recycle-restore-attest` refuses an output path that aliases the source evidence report, manifest, or generated KEEP/RECYCLE fixture, stages JSON under an unpredictable exclusive temporary name in the destination directory, validates those staged bytes, flushes them to disk, and only then atomically replaces `RELEASE_EVIDENCE.json`. A stale predictable `.tmp` file is never reused, so interrupted or hostile staging state cannot silently overwrite the evidence inputs.
+
 ## Release workflow
 
 The Windows release job must complete these steps in order:
