@@ -1,11 +1,19 @@
 """Enhanced Diagnostics Center with categorized scan issues and explicit JSON export."""
 from __future__ import annotations
 
+import hashlib
+import json
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import i18n
-from .diagnostics_gui import DiagnosticsWindow
+from .diagnostics_gui import DiagnosticsWindow, diag_tr
+from .release_attestation import (
+    ATTESTATION_NAME,
+    PackagedAttestationError,
+    validate_packaged_attestation,
+)
 from .scan_diagnostics import summarize_scan_result, write_scan_diagnostics_report
 
 
@@ -54,8 +62,76 @@ def category_label(category: str) -> str:
     return plus_tr(CATEGORY_LABELS.get(category, "Inny komunikat"))
 
 
+def validate_resumed_release_attestation(check, report_path, attestation_path) -> Path:
+    """Validate a persisted RELEASE_EVIDENCE file against the resumed session.
+
+    The standalone attestation validator proves schema/current-contract integrity.
+    This additional cross-check binds the persisted file to the exact report and
+    generated fixture that the Diagnostics Center just resumed, so a valid file
+    from another qualified session can never be shown as this session's evidence.
+    """
+
+    report = Path(report_path).expanduser().resolve()
+    attestation = Path(attestation_path).expanduser().resolve()
+    try:
+        report_bytes = report.read_bytes()
+        payload = json.loads(attestation.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PackagedAttestationError(
+            f"cannot read persisted release evidence: {error}"
+        ) from error
+
+    validated = validate_packaged_attestation(payload)
+    expected = {
+        "session_id": check.session_id,
+        "fixture_sha256": check.digest,
+        "manifest_fingerprint": check.manifest_fingerprint,
+        "evidence_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
+    }
+    for field, value in expected.items():
+        if validated.get(field) != value:
+            raise PackagedAttestationError(
+                f"persisted release evidence does not match resumed {field}"
+            )
+    return attestation
+
+
 class EnhancedDiagnosticsWindow(DiagnosticsWindow):
     """Diagnostics view that explains skips/errors without altering scan state."""
+
+    def resume_check(self):
+        """Resume the base physical test and recover already-written attestation."""
+
+        super().resume_check()
+        if self.check is None or self.evidence_report is None:
+            return
+
+        candidate = self.check.folder / ATTESTATION_NAME
+        if not candidate.is_file():
+            return
+        try:
+            validated = validate_resumed_release_attestation(
+                self.check,
+                self.evidence_report,
+                candidate,
+            )
+        except (OSError, PackagedAttestationError) as error:
+            messagebox.showerror(
+                diag_tr("Nie udało się utworzyć dowodu wydania"),
+                str(error),
+                parent=self.window,
+            )
+            return
+
+        self.release_attestation = validated
+        self.attest_button.configure(state="disabled")
+        self.copy_button.configure(
+            text=diag_tr("Kopiuj ścieżkę RELEASE_EVIDENCE"),
+            state="normal",
+        )
+        self.recycle_status.set(
+            diag_tr("RELEASE_EVIDENCE gotowy: {v0}", v0=validated)
+        )
 
     def _build_warnings(self, parent):
         self.issue_summary = summarize_scan_result(self.app.result)
