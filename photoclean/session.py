@@ -50,6 +50,7 @@ class SessionAudit:
     changed_count: int
     unavailable_count: int
     unsafe_link_count: int
+    duplicate_identity_count: int
     dropped_group_count: int
 
     @property
@@ -213,8 +214,11 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
 
     A resumed session can outlive the files it describes. This preflight compares
     each saved member with its current filesystem signature and rejects missing,
-    changed, unavailable or linked/reparse entries. Groups are rebuilt only from
-    surviving members and groups with fewer than two members are dropped.
+    changed, unavailable or linked/reparse entries. It also restores the scanner's
+    invariant that one physical file identity can appear only once, so a stale or
+    hand-edited session cannot present hardlink aliases as independent copies.
+    Groups are rebuilt only from surviving members and groups with fewer than two
+    members are dropped.
 
     This is deliberately *not* a content-hash safety check. It keeps resume fast
     for large libraries; cleanup still performs the normal full hash/content
@@ -224,11 +228,13 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
     _require_int(detail_limit, "detail_limit", minimum=0, maximum=1000)
     valid: list[Photo] = []
     invalid_paths: set[Path] = set()
+    seen_file_identities: set[tuple[int, int]] = set()
     detail_lines: list[str] = []
     missing_count = 0
     changed_count = 0
     unavailable_count = 0
     unsafe_link_count = 0
+    duplicate_identity_count = 0
 
     def reject(photo: Photo, reason: str):
         invalid_paths.add(photo.path)
@@ -256,6 +262,15 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
             changed_count += 1
             reject(photo, "filesystem signature changed since the saved scan")
             continue
+
+        current_inode = int(current.st_ino)
+        identity = (int(current.st_dev), current_inode)
+        if current_inode and identity in seen_file_identities:
+            duplicate_identity_count += 1
+            reject(photo, "same physical file is already present in the resumed session")
+            continue
+        if current_inode:
+            seen_file_identities.add(identity)
         valid.append(photo)
 
     valid_paths = {photo.path for photo in valid}
@@ -276,7 +291,8 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
             "Session resume preflight: "
             f"kept {len(valid)}/{len(snapshot.result.photos)} photos; "
             f"missing={missing_count}, changed={changed_count}, "
-            f"unavailable={unavailable_count}, link/reparse={unsafe_link_count}; "
+            f"unavailable={unavailable_count}, link/reparse={unsafe_link_count}, "
+            f"duplicate-identity={duplicate_identity_count}; "
             f"dropped groups={dropped_group_count}."
         )
         audit_warnings.extend(detail_lines)
@@ -301,6 +317,7 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
         changed_count=changed_count,
         unavailable_count=unavailable_count,
         unsafe_link_count=unsafe_link_count,
+        duplicate_identity_count=duplicate_identity_count,
         dropped_group_count=dropped_group_count,
     )
 
@@ -327,18 +344,38 @@ def save_session(snapshot: SessionSnapshot, destination):
             temporary.unlink(missing_ok=True)
 
 
-def load_session(source):
-    """Load and strictly validate a snapshot without touching referenced photos."""
+def _read_session_bytes(source: Path) -> bytes:
+    """Read at most the configured session limit from one open file handle.
 
-    source = Path(source)
+    A separate ``stat`` followed by ``read_text`` leaves a race where a session can
+    grow or be replaced between the size check and the actual read. Bounded reads
+    keep the memory limit authoritative even when the file changes concurrently.
+    """
+
     try:
-        size = source.stat().st_size
+        with source.open("rb") as stream:
+            encoded = stream.read(MAX_SESSION_BYTES + 1)
+            if len(encoded) > MAX_SESSION_BYTES:
+                raise SessionError("session file exceeds the supported size")
+            # A regular file normally satisfies the sized read in one call. Keep a
+            # second one-byte probe so unusual streams/filesystems cannot hide data
+            # behind a short read and bypass the configured upper bound.
+            if stream.read(1):
+                raise SessionError("session file exceeds the supported size")
+            return encoded
+    except SessionError:
+        raise
     except OSError as error:
         raise SessionError(f"cannot read session: {error}") from error
-    if size > MAX_SESSION_BYTES:
-        raise SessionError("session file exceeds the supported size")
+
+
+def load_session(source):
+    """Load and strictly validate a bounded snapshot without touching referenced photos."""
+
+    source = Path(source)
+    encoded = _read_session_bytes(source)
     try:
-        raw = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raw = json.loads(encoded.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
         raise SessionError(f"invalid session file: {error}") from error
     return snapshot_from_dict(raw)
