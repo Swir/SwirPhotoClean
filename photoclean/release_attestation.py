@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .diagnostics import RecycleVerificationError
-from .recycle_evidence import validate_restore_evidence_report
+from .evidence_snapshot import load_validated_restore_evidence_snapshot
 from .safety_contract import SafetyContractError, runtime_safety_contract_sha256
 
 SCHEMA_VERSION = 3
@@ -172,18 +172,10 @@ def build_packaged_attestation(
         )
 
     try:
-        check, report = validate_restore_evidence_report(report_path)
+        check, report, raw, source = load_validated_restore_evidence_snapshot(report_path)
     except RecycleVerificationError as error:
         raise PackagedAttestationError(
             f"Recycle evidence report is not release-ready: {error}"
-        ) from error
-
-    try:
-        raw = report.read_bytes()
-        source = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise PackagedAttestationError(
-            f"cannot read validated recycle evidence report: {error}"
         ) from error
 
     manifest = source.get("manifest")
