@@ -4,7 +4,9 @@ SWIR PhotoClean treats the Windows Recycle Bin as the only cleanup destination. 
 
 ## Reparse-aware fail-closed guard
 
-A recycle request is refused when the target itself or any existing component in its path is a symbolic link, junction, mount-style reparse point, or another Windows reparse point. The check intentionally uses the unrevolved absolute path: resolving first could hide a junction boundary and make the final operation act on a location different from the path the review workflow validated.
+A recycle request is refused when the target itself or any existing component in its path is a symbolic link, junction, mount-style reparse point, or another Windows reparse point. The check intentionally uses the unresolved absolute path: resolving first could hide a junction boundary and make the final operation act on a location different from the path the review workflow validated.
+
+The ancestry check is also **fail closed on metadata errors**. If the target disappears, a component cannot be inspected, or Windows denies metadata access, SWIR PhotoClean refuses the operation instead of assuming the path is a normal file. That keeps stale paths and permission races from reaching the Windows Shell delete request.
 
 This is an operation-time defense in depth. The scanner already skips reparse points and cloud-placeholder-style entries, but a path can change between scanning and cleanup or a generated Recycle/Restore evidence workspace can be placed below a redirected directory. The final recycle call therefore checks the ancestry again.
 
@@ -14,4 +16,4 @@ The existing fixed-local-drive gate remains mandatory after this check. Network/
 
 The physical 1.0 Recycle/Restore test uses the same production `photoclean.recycle.recycle_file` backend, so the generated `RECYCLE-ME.png` cannot qualify evidence through an ambiguous reparse/junction path. If the check refuses the path, choose an ordinary folder on a local fixed drive and create a fresh evidence session there.
 
-Unit tests cover regular paths, target-level reparse rejection, ancestor-level rejection, and full ancestry traversal. The real Windows move/Restore acceptance item in `STATUS.md` remains unchanged and must still be completed physically before a qualified 1.0 release.
+Unit tests cover regular paths, missing targets, unreadable path metadata, target-level reparse rejection, ancestor-level rejection, and full ancestry traversal. The real Windows move/Restore acceptance item in `STATUS.md` remains unchanged and must still be completed physically before a qualified 1.0 release.

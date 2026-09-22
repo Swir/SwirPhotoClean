@@ -16,6 +16,29 @@ class RecyclePathSafetyTests(unittest.TestCase):
 
             self.assertEqual(checked, candidate.absolute())
 
+    def test_missing_target_fails_closed_before_shell_recycle(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "missing.png"
+
+            with self.assertRaisesRegex(
+                OSError,
+                "Nie można bezpiecznie sprawdzić ścieżki przed Koszem",
+            ):
+                _require_no_reparse_ancestry(candidate)
+
+    def test_unreadable_path_metadata_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.write_bytes(b"safe")
+
+            with patch.object(
+                Path,
+                "lstat",
+                side_effect=PermissionError("metadata denied"),
+            ):
+                with self.assertRaisesRegex(OSError, "metadata denied"):
+                    _require_no_reparse_ancestry(candidate)
+
     def test_reparse_target_is_rejected_before_recycle(self):
         with tempfile.TemporaryDirectory() as folder:
             candidate = (Path(folder) / "RECYCLE-ME.png").absolute()

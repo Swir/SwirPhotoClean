@@ -1,6 +1,7 @@
 from .i18n import tr
 """Windows recycle-only operation, with a callback veto for permanent deletion."""
 import os
+import stat
 from pathlib import Path
 
 
@@ -8,12 +9,18 @@ _REPARSE_POINT_ATTRIBUTE = 0x400
 
 
 def _is_link_or_reparse(path: Path) -> bool:
-    """Return True for symbolic links, junctions and other reparse points."""
+    """Return True for links/reparse points and fail closed on unreadable metadata."""
     try:
         info = path.lstat()
-    except OSError:
-        return False
-    return path.is_symlink() or bool(
+    except OSError as error:
+        raise OSError(
+            tr(
+                'Nie można bezpiecznie sprawdzić ścieżki przed Koszem: {v0}: {v1}',
+                v0=str(path),
+                v1=error,
+            )
+        ) from error
+    return stat.S_ISLNK(info.st_mode) or bool(
         getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
     )
 
@@ -23,6 +30,8 @@ def _require_no_reparse_ancestry(path) -> Path:
 
     ``Path.resolve()`` is intentionally not used here because resolving first would
     hide the very junction/symlink boundary this safety check is meant to detect.
+    Every path component must also be inspectable. Missing or permission-denied
+    metadata therefore fails closed instead of being treated as a regular path.
     The production scanner already avoids reparse points; this is a second,
     operation-time guard so stale state or an externally changed path still fails
     closed before Windows receives a delete request.
