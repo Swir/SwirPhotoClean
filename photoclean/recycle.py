@@ -8,10 +8,10 @@ from pathlib import Path
 _REPARSE_POINT_ATTRIBUTE = 0x400
 
 
-def _is_link_or_reparse(path: Path) -> bool:
-    """Return True for links/reparse points and fail closed on unreadable metadata."""
+def _safe_lstat(path: Path):
+    """Read path metadata for a safety decision; never treat failure as safe."""
     try:
-        info = path.lstat()
+        return path.lstat()
     except OSError as error:
         raise OSError(
             tr(
@@ -20,6 +20,11 @@ def _is_link_or_reparse(path: Path) -> bool:
                 v1=error,
             )
         ) from error
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    """Return True for links/reparse points and fail closed on unreadable metadata."""
+    info = _safe_lstat(path)
     return stat.S_ISLNK(info.st_mode) or bool(
         getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
     )
@@ -48,6 +53,22 @@ def _require_no_reparse_ancestry(path) -> Path:
     return candidate
 
 
+def _require_regular_file_target(path) -> Path:
+    """Return a safe absolute recycle target and reject non-file replacements.
+
+    The cleanup UI only ever intends to recycle files that were part of a verified
+    photo result. A stale path can nevertheless be replaced with a directory or
+    another filesystem object after the scan. Keep that object from reaching the
+    Windows Shell delete request even if an earlier scanner-level revalidation has
+    already happened.
+    """
+    candidate = _require_no_reparse_ancestry(path)
+    info = _safe_lstat(candidate)
+    if not stat.S_ISREG(info.st_mode):
+        raise OSError(tr('Cel Kosza nie jest zwykłym plikiem: {v0}', v0=str(candidate)))
+    return candidate
+
+
 def recycle_file(path):
     if os.name != "nt":
         raise OSError(tr('Przenoszenie do kosza w tej wersji jest dostępne tylko na Windows.'))
@@ -57,7 +78,7 @@ def recycle_file(path):
     from win32com.server.exception import COMException
     from send2trash.win.IFileOperationProgressSink import FileOperationProgressSink
 
-    absolute_path = _require_no_reparse_ancestry(path)
+    absolute_path = _require_regular_file_target(path)
     absolute = str(absolute_path)
     volume = ctypes.create_unicode_buffer(32768)
     if not ctypes.windll.kernel32.GetVolumePathNameW(absolute, volume, len(volume)):
