@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from photoclean.recycle import _require_no_reparse_ancestry
+from photoclean.recycle import _require_no_reparse_ancestry, _require_regular_file_target
 
 
 class RecyclePathSafetyTests(unittest.TestCase):
@@ -15,6 +15,23 @@ class RecyclePathSafetyTests(unittest.TestCase):
             checked = _require_no_reparse_ancestry(candidate)
 
             self.assertEqual(checked, candidate.absolute())
+
+    def test_regular_file_target_is_accepted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.write_bytes(b"safe")
+
+            checked = _require_regular_file_target(candidate)
+
+            self.assertEqual(checked, candidate.absolute())
+
+    def test_directory_replacement_is_rejected_before_shell_recycle(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.mkdir()
+
+            with self.assertRaisesRegex(OSError, "Cel Kosza nie jest zwykłym plikiem"):
+                _require_regular_file_target(candidate)
 
     def test_missing_target_fails_closed_before_shell_recycle(self):
         with tempfile.TemporaryDirectory() as folder:
