@@ -8,7 +8,13 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import i18n
+from .diagnostics import RecycleVerificationError, load_recycle_verification
 from .diagnostics_gui import DiagnosticsWindow, diag_tr
+from .recycle_evidence import (
+    REPORT_NAME,
+    _require_runtime_safety_contract,
+    validate_restore_evidence_report,
+)
 from .release_attestation import (
     ATTESTATION_NAME,
     PackagedAttestationError,
@@ -100,19 +106,54 @@ class EnhancedDiagnosticsWindow(DiagnosticsWindow):
     """Diagnostics view that explains skips/errors without altering scan state."""
 
     def resume_check(self):
-        """Resume the base physical test and recover already-written attestation."""
+        """Resume one qualified session transactionally, then recover its attestation.
 
-        super().resume_check()
-        if self.check is None or self.evidence_report is None:
+        The base window intentionally keeps the previous valid session when a new
+        manifest cannot be loaded. Enhanced Diagnostics must not mistake that old
+        state for a successful resume and adopt its RELEASE_EVIDENCE after a failed
+        file selection. Validate the newly chosen manifest/report completely before
+        mutating the active UI state, then recover attestation only for that session.
+        """
+
+        manifest = filedialog.askopenfilename(
+            title=diag_tr("Wybierz manifest testu Kosza"),
+            parent=self.window,
+            filetypes=(("JSON", "*.json"), ("All files", "*.*")),
+        )
+        if not manifest:
             return
 
-        candidate = self.check.folder / ATTESTATION_NAME
+        try:
+            check = load_recycle_verification(Path(manifest).expanduser().resolve())
+            _require_runtime_safety_contract(check)
+            report = None
+            if check.stage == "restored-verified":
+                candidate_report = check.folder / REPORT_NAME
+                if candidate_report.is_file():
+                    validate_restore_evidence_report(
+                        candidate_report,
+                        manifest=check.manifest,
+                    )
+                    report = candidate_report
+        except (OSError, RecycleVerificationError) as error:
+            messagebox.showerror(
+                diag_tr("Nie udało się wykonać testu Kosza"),
+                str(error),
+                parent=self.window,
+            )
+            return
+
+        self._apply_check_state(check, report)
+        if report is None:
+            return
+
+        candidate = check.folder / ATTESTATION_NAME
         if not candidate.is_file():
             return
         try:
             validated = validate_resumed_release_attestation(
-                self.check,
-                self.evidence_report,
+                check,
+                report,
                 candidate,
             )
         except (OSError, PackagedAttestationError) as error:
