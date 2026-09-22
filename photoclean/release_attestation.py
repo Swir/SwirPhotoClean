@@ -8,11 +8,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .diagnostics import RecycleVerificationError
+from .diagnostics import (
+    COPY_NAME,
+    MANIFEST_NAME,
+    ORIGINAL_NAME,
+    RecycleVerificationError,
+)
 from .evidence_snapshot import load_validated_restore_evidence_snapshot
 from .safety_contract import SafetyContractError, runtime_safety_contract_sha256
 
@@ -254,6 +261,57 @@ def build_packaged_attestation(
     return validate_packaged_attestation(payload)
 
 
+def _validated_output_path(report_path: str | Path, output_path: str | Path) -> Path:
+    """Return a safe attestation destination without aliasing source evidence files."""
+    report = Path(report_path).expanduser().resolve()
+    output = Path(output_path).expanduser().resolve()
+    protected = {
+        report,
+        report.parent / MANIFEST_NAME,
+        report.parent / ORIGINAL_NAME,
+        report.parent / COPY_NAME,
+    }
+    if output in protected:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json output cannot overwrite the evidence report, "
+            "manifest, or generated verification files"
+        )
+    return output
+
+
+def _write_validated_json_atomically(output: Path, payload: dict) -> None:
+    """Validate staged bytes before an atomic replace; never use a predictable temp path."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.",
+        suffix=".tmp",
+        dir=output.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        try:
+            staged = json.loads(temporary.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise PackagedAttestationError(
+                f"cannot re-read staged release evidence: {error}"
+            ) from error
+        if validate_packaged_attestation(staged) != payload:
+            raise PackagedAttestationError(
+                "staged release evidence differs from validated attestation"
+            )
+        temporary.replace(output)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def write_packaged_attestation(
     report_path: str | Path,
     output_path: str | Path,
@@ -264,14 +322,8 @@ def write_packaged_attestation(
         report_path,
         confirm_manual_restore=confirm_manual_restore,
     )
-    output = Path(output_path).expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_suffix(output.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(output)
+    output = _validated_output_path(report_path, output_path)
+    _write_validated_json_atomically(output, payload)
 
     try:
         written = json.loads(output.read_text(encoding="utf-8"))
