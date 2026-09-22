@@ -195,16 +195,11 @@ def build_release_evidence(
 
     try:
         from photoclean.diagnostics import RecycleVerificationError
-        from photoclean.recycle_evidence import validate_restore_evidence_report
+        from photoclean.evidence_snapshot import load_validated_restore_evidence_snapshot
 
-        check, report = validate_restore_evidence_report(report_path)
+        check, report, raw, source = load_validated_restore_evidence_snapshot(report_path)
     except RecycleVerificationError as error:
         raise ReleaseEvidenceError(f"Recycle evidence report is not release-ready: {error}") from error
-    try:
-        raw = report.read_bytes()
-        source = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ReleaseEvidenceError(f"cannot read validated recycle evidence report: {error}") from error
 
     manifest = source.get("manifest")
     inspection = source.get("inspection")

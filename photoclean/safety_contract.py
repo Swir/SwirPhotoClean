@@ -43,6 +43,7 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/diagnostics_plus_gui.py",
     "photoclean/difference.py",
     "photoclean/difference_gui.py",
+    "photoclean/evidence_snapshot.py",
     "photoclean/exif_metadata.py",
     "photoclean/folder_health_app.py",
     "photoclean/folder_health_gui.py",
