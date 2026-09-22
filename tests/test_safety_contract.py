@@ -22,7 +22,7 @@ class SafetyContractTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"fixture-{index}\n", encoding="utf-8")
 
-    def test_contract_covers_runtime_build_and_release_verification_path(self):
+    def test_contract_covers_runtime_build_release_and_gui_attestation_path(self):
         required = {
             ".github/workflows/windows.yml",
             "requirements.txt",
@@ -30,10 +30,16 @@ class SafetyContractTests(unittest.TestCase):
             "run.py",
             "photoclean/__init__.py",
             "photoclean/core.py",
+            "photoclean/diagnostics.py",
+            "photoclean/diagnostics_gui.py",
+            "photoclean/diagnostics_plus_gui.py",
             "photoclean/recycle.py",
             "photoclean/recycle_evidence.py",
+            "photoclean/release_attestation.py",
+            "photoclean/release_evidence_cli.py",
             "photoclean/safety_contract.py",
             "photoclean/selftest.py",
+            "photoclean/selftest_performance.py",
             "photoclean/storage.py",
             "tools/release_evidence.py",
             "tools/release_gate.py",
@@ -60,10 +66,12 @@ class SafetyContractTests(unittest.TestCase):
             third = build_source_safety_contract(root)
             self.assertNotEqual(first["sha256"], third["sha256"])
 
-    def test_build_identity_dispatch_and_provenance_changes_invalidate_contract(self):
+    def test_build_identity_dispatch_gui_attestation_and_provenance_changes_invalidate_contract(self):
         for relative in (
             "photoclean/__init__.py",
             "photoclean/storage.py",
+            "photoclean/diagnostics_gui.py",
+            "photoclean/diagnostics_plus_gui.py",
             "requirements-build.txt",
             "photoclean/selftest.py",
             "tools/release_provenance.py",
