@@ -106,6 +106,10 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
 
     expected_identity = _safe_output_identity(target)
     raw = json.dumps(normalized, ensure_ascii=False, indent=2).encode("utf-8")
+    # JSON normalizes tuples (for example inspection.problems) to arrays.  Compare
+    # staged data to the exact data-model encoded by ``raw`` rather than to the
+    # pre-serialization Python container types.
+    expected_payload = json.loads(raw.decode("utf-8"))
 
     try:
         descriptor, temporary_name = tempfile.mkstemp(
@@ -141,7 +145,7 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
             raise diagnostics.RecycleVerificationError(
                 "Staged evidence JSON is not valid UTF-8 JSON"
             ) from error
-        if staged_payload != normalized:
+        if staged_payload != expected_payload:
             raise diagnostics.RecycleVerificationError(
                 "Staged evidence JSON does not match the validated payload"
             )
