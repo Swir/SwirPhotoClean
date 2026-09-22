@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import secrets
+import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +25,8 @@ SCHEMA_VERSION = 3
 EVIDENCE_KIND = "windows-recycle-restore"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_REPARSE_POINT_ATTRIBUTE = 0x400
+_STAGE_ATTEMPTS = 32
 _REQUIRED_TRUE_FLAGS = (
     "physical_recycle_move_confirmed",
     "manual_restore_performed",
@@ -264,24 +269,137 @@ def build_release_evidence(
     return validate_release_evidence(payload)
 
 
+def _absolute_without_resolving(path: str | Path) -> Path:
+    """Return an absolute path while preserving the final filesystem entry."""
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _paths_alias(first: Path, second: Path) -> bool:
+    """Detect lexical aliases and existing hardlink/symlink aliases."""
+    first_text = os.path.normcase(os.path.abspath(os.fspath(first)))
+    second_text = os.path.normcase(os.path.abspath(os.fspath(second)))
+    if first_text == second_text:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _release_evidence_output_identity(path: Path) -> tuple[int, int, int, int, int] | None:
+    """Return output identity or fail closed for unsafe existing output entries."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ReleaseEvidenceError(
+            f"cannot safely inspect release evidence output path {path}: {error}"
+        ) from error
+
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise ReleaseEvidenceError(
+            "release evidence output must not be a symlink, junction or reparse point"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise ReleaseEvidenceError("release evidence output must be a regular file")
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _write_validated_atomic_json(
+    output: Path,
+    payload: dict,
+    expected_output_identity: tuple[int, int, int, int, int] | None,
+) -> None:
+    """Durably stage validated bytes beside the target before one atomic replace."""
+    raw = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+
+    for _attempt in range(_STAGE_ATTEMPTS):
+        temporary = output.parent / f".{output.name}.{secrets.token_hex(8)}.tmp"
+        try:
+            descriptor = os.open(temporary, flags, 0o600)
+        except FileExistsError:
+            continue
+        except OSError as error:
+            raise ReleaseEvidenceError(
+                f"cannot create exclusive release evidence staging file: {error}"
+            ) from error
+
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+
+            try:
+                staged_raw = temporary.read_bytes()
+            except OSError as error:
+                raise ReleaseEvidenceError(
+                    f"cannot re-read staged release evidence: {error}"
+                ) from error
+            if staged_raw != raw:
+                raise ReleaseEvidenceError("staged release evidence bytes changed before commit")
+            try:
+                staged_payload = json.loads(staged_raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ReleaseEvidenceError(
+                    "staged release evidence is not valid UTF-8 JSON"
+                ) from error
+            validate_release_evidence(staged_payload)
+
+            if _release_evidence_output_identity(output) != expected_output_identity:
+                raise ReleaseEvidenceError(
+                    "release evidence output changed while validated bytes were staged"
+                )
+            try:
+                os.replace(temporary, output)
+            except OSError as error:
+                raise ReleaseEvidenceError(
+                    f"cannot atomically replace release evidence output: {error}"
+                ) from error
+            return
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    raise ReleaseEvidenceError(
+        "cannot allocate an exclusive release evidence staging file"
+    )
+
+
 def write_release_evidence(
     report_path: str | Path,
     output_path: str | Path = RELEASE_EVIDENCE_PATH,
     *,
     confirm_manual_restore: bool,
 ) -> Path:
+    report = _absolute_without_resolving(report_path)
+    output = _absolute_without_resolving(output_path)
+    if _paths_alias(report, output):
+        raise ReleaseEvidenceError(
+            "release evidence output must not overwrite or alias the raw recycle evidence report"
+        )
+
+    expected_output_identity = _release_evidence_output_identity(output)
     payload = build_release_evidence(
-        report_path,
+        report,
         confirm_manual_restore=confirm_manual_restore,
     )
-    output = Path(output_path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_suffix(output.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(output)
+    _write_validated_atomic_json(output, payload, expected_output_identity)
     return output
 
 

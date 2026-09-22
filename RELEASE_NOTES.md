@@ -14,6 +14,7 @@ SWIR PhotoClean 1.0.0 to lokalny, review-first cleaner zdjęć dla Windows 10/11
 - Bezpieczny cleanup: rewalidacja plików, ochrona co najmniej jednej kopii w grupie oraz wyłącznie Windows Recycle Bin — bez fallbacku do trwałego usuwania.
 - Portable PyInstaller onedir, packaged `SwirPhotoClean.exe --self-test`, checksumy SHA-256, provenance i publiczny post-release smoke.
 - Packaged evidence workflow wiążący fizyczny test Recycle/Restore z dokładnym release safety contractem i wersją 1.0.0.
+- Zapis `RELEASE_EVIDENCE.json` jest fail-closed: nie może nadpisać ani aliasować surowego raportu Recycle/Restore, odrzuca niebezpieczny istniejący cel i używa unikalnego stagingu z fsync, walidacją oraz atomową podmianą.
 
 Rozpakuj cały ZIP i uruchom `SwirPhotoClean.exe`. Nie przenoś samego EXE poza folder aplikacji.
 
@@ -31,6 +32,7 @@ SWIR PhotoClean 1.0.0 is a local, review-first photo cleaner for Windows 10/11. 
 - Safe cleanup with file revalidation, at-least-one-copy group protection, and Windows Recycle Bin only — no permanent-delete fallback.
 - Portable PyInstaller onedir package, packaged `SwirPhotoClean.exe --self-test`, SHA-256 checksums, provenance, and public post-release smoke verification.
 - Packaged evidence workflow binding the physical Recycle/Restore test to the exact release safety contract and 1.0.0 version identity.
+- `RELEASE_EVIDENCE.json` persistence is fail-closed: it cannot overwrite or alias the raw Recycle/Restore report, rejects an unsafe existing target, and uses exclusive randomized staging with fsync, validation, and atomic replacement.
 
 Extract the entire ZIP and launch `SwirPhotoClean.exe`. Keep the executable with its accompanying files.
 
