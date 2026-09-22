@@ -21,6 +21,12 @@ def prepare_frozen_tk():
 if __name__ == "__main__":
     prepare_frozen_tk()
 
+    # Release evidence is safety-critical. Install the fail-closed JSON writer
+    # before GUI/CLI modules import and bind diagnostics persistence helpers.
+    from photoclean.evidence_io import install_hardened_evidence_io
+
+    install_hardened_evidence_io()
+
     from photoclean.storage import resolve_runtime_storage
 
     runtime = resolve_runtime_storage()
