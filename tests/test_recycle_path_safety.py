@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,9 @@ from photoclean.recycle import (
     _file_identity,
     _require_no_reparse_ancestry,
     _require_regular_file_target,
+    _require_same_file_content,
     _require_same_regular_file_target,
+    _stable_file_sha256,
 )
 
 
@@ -68,6 +71,35 @@ class RecyclePathSafetyTests(unittest.TestCase):
 
             with self.assertRaisesRegex(OSError, "Plik zmienił się"):
                 _require_same_regular_file_target(candidate, expected)
+
+    def test_stable_digest_accepts_unchanged_regular_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.write_bytes(b"safe")
+            expected_identity = _file_identity(candidate)
+
+            digest = _stable_file_sha256(candidate, expected_identity)
+
+            self.assertEqual(digest, hashlib.sha256(b"safe").hexdigest())
+
+    def test_content_guard_rejects_digest_mismatch_even_if_metadata_guard_accepts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = (Path(folder) / "photo.png").absolute()
+            candidate.write_bytes(b"safe")
+            expected_identity = _file_identity(candidate)
+            expected_digest = hashlib.sha256(b"safe").hexdigest()
+            candidate.write_bytes(b"evil")  # same length: exercise the content signal itself
+
+            with patch(
+                "photoclean.recycle._require_same_regular_file_target",
+                return_value=candidate,
+            ):
+                with self.assertRaisesRegex(OSError, "Zawartość pliku zmieniła się"):
+                    _require_same_file_content(
+                        candidate,
+                        expected_identity,
+                        expected_digest,
+                    )
 
     def test_missing_target_fails_closed_before_shell_recycle(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -1,11 +1,13 @@
 from .i18n import tr
 """Windows recycle-only operation, with a callback veto for permanent deletion."""
+import hashlib
 import os
 import stat
 from pathlib import Path
 
 
 _REPARSE_POINT_ATTRIBUTE = 0x400
+_HASH_CHUNK_BYTES = 1024 * 1024
 
 
 def _safe_lstat(path: Path):
@@ -89,6 +91,41 @@ def _require_same_regular_file_target(path, expected_identity) -> Path:
     return candidate
 
 
+def _stable_file_sha256(path, expected_identity) -> str:
+    """Hash a recycle target only while it remains the same verified regular file.
+
+    Metadata identity catches normal replacements cheaply, but a second content
+    signal closes the gap where a same-size mutation might otherwise preserve the
+    fields used by the final Shell handoff checks. The identity is validated both
+    before and after the read so a digest collected across a replacement is never
+    accepted as release-safety evidence.
+    """
+    candidate = _require_same_regular_file_target(path, expected_identity)
+    digest = hashlib.sha256()
+    try:
+        with candidate.open("rb") as stream:
+            while chunk := stream.read(_HASH_CHUNK_BYTES):
+                digest.update(chunk)
+    except OSError as error:
+        raise OSError(
+            tr(
+                'Nie można bezpiecznie sprawdzić ścieżki przed Koszem: {v0}: {v1}',
+                v0=str(candidate),
+                v1=error,
+            )
+        ) from error
+    _require_same_regular_file_target(candidate, expected_identity)
+    return digest.hexdigest()
+
+
+def _require_same_file_content(path, expected_identity, expected_digest) -> Path:
+    """Fail closed if full file content differs from the recycle safety snapshot."""
+    candidate = _require_same_regular_file_target(path, expected_identity)
+    if _stable_file_sha256(candidate, expected_identity) != expected_digest:
+        raise OSError(tr('Zawartość pliku zmieniła się: {v0}', v0=str(candidate)))
+    return candidate
+
+
 def recycle_file(path):
     if os.name != "nt":
         raise OSError(tr('Przenoszenie do kosza w tej wersji jest dostępne tylko na Windows.'))
@@ -106,6 +143,10 @@ def recycle_file(path):
         raise OSError(tr('Nie można ustalić woluminu pliku.'))
     if ctypes.windll.kernel32.GetDriveTypeW(volume.value) != 3:
         raise OSError(tr('Kosz obsługujemy tylko na lokalnych dyskach stałych. Dysk sieciowy lub wymienny: operacja zablokowana.'))
+
+    # Only fixed local targets reach the full-content safety snapshot. This avoids
+    # expensive reads on network/removable paths that the cleanup policy blocks.
+    expected_digest = _stable_file_sha256(absolute_path, expected_identity)
 
     class RecycleOnlySink(FileOperationProgressSink):
         def __init__(self):
@@ -137,7 +178,7 @@ def recycle_file(path):
         item = shell.SHCreateItemFromParsingName(absolute, None, shell.IID_IShellItem)
         _require_same_regular_file_target(absolute_path, expected_identity)
         operation.DeleteItem(item, wrapped)
-        _require_same_regular_file_target(absolute_path, expected_identity)
+        _require_same_file_content(absolute_path, expected_identity, expected_digest)
         try:
             result = operation.PerformOperations()
         except pythoncom.com_error as error:
