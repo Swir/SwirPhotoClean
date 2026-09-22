@@ -5,9 +5,9 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import stat
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,7 +26,6 @@ EVIDENCE_KIND = "windows-recycle-restore"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _REPARSE_POINT_ATTRIBUTE = 0x400
-_STAGE_ATTEMPTS = 32
 _REQUIRED_TRUE_FLAGS = (
     "physical_recycle_move_confirmed",
     "manual_restore_performed",
@@ -321,63 +320,55 @@ def _write_validated_atomic_json(
 ) -> None:
     """Durably stage validated bytes beside the target before one atomic replace."""
     raw = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            dir=output.parent,
+        )
+    except OSError as error:
+        raise ReleaseEvidenceError(
+            f"cannot create exclusive release evidence staging file: {error}"
+        ) from error
 
-    for _attempt in range(_STAGE_ATTEMPTS):
-        temporary = output.parent / f".{output.name}.{secrets.token_hex(8)}.tmp"
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+
         try:
-            descriptor = os.open(temporary, flags, 0o600)
-        except FileExistsError:
-            continue
+            staged_raw = temporary.read_bytes()
         except OSError as error:
             raise ReleaseEvidenceError(
-                f"cannot create exclusive release evidence staging file: {error}"
+                f"cannot re-read staged release evidence: {error}"
             ) from error
-
+        if staged_raw != raw:
+            raise ReleaseEvidenceError("staged release evidence bytes changed before commit")
         try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
+            staged_payload = json.loads(staged_raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ReleaseEvidenceError(
+                "staged release evidence is not valid UTF-8 JSON"
+            ) from error
+        validate_release_evidence(staged_payload)
 
-            try:
-                staged_raw = temporary.read_bytes()
-            except OSError as error:
-                raise ReleaseEvidenceError(
-                    f"cannot re-read staged release evidence: {error}"
-                ) from error
-            if staged_raw != raw:
-                raise ReleaseEvidenceError("staged release evidence bytes changed before commit")
-            try:
-                staged_payload = json.loads(staged_raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise ReleaseEvidenceError(
-                    "staged release evidence is not valid UTF-8 JSON"
-                ) from error
-            validate_release_evidence(staged_payload)
-
-            if _release_evidence_output_identity(output) != expected_output_identity:
-                raise ReleaseEvidenceError(
-                    "release evidence output changed while validated bytes were staged"
-                )
-            try:
-                os.replace(temporary, output)
-            except OSError as error:
-                raise ReleaseEvidenceError(
-                    f"cannot atomically replace release evidence output: {error}"
-                ) from error
-            return
-        finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                pass
-
-    raise ReleaseEvidenceError(
-        "cannot allocate an exclusive release evidence staging file"
-    )
+        if _release_evidence_output_identity(output) != expected_output_identity:
+            raise ReleaseEvidenceError(
+                "release evidence output changed while validated bytes were staged"
+            )
+        try:
+            os.replace(temporary, output)
+        except OSError as error:
+            raise ReleaseEvidenceError(
+                f"cannot atomically replace release evidence output: {error}"
+            ) from error
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def write_release_evidence(
