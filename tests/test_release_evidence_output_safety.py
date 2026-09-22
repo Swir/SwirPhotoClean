@@ -76,7 +76,7 @@ class ReleaseEvidenceOutputSafetyTests(unittest.TestCase):
                 confirm_manual_restore=True,
             )
 
-            self.assertEqual(written, output.absolute())
+            self.assertEqual(written, output.resolve())
             self.assertTrue(output.is_file())
             self.assertEqual(legacy_tmp.read_bytes(), sentinel)
             self.assertEqual(list(Path(folder).glob(".RELEASE_EVIDENCE.json.*.tmp")), [])
