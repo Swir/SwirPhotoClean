@@ -49,10 +49,12 @@ def bare_window(check=None):
     window.window = object()
     window.check = check
     window.evidence_report = None
+    window.release_attestation = None
     window.recycle_status = DummyVar()
     window.prepare_button = DummyWidget()
     window.move_button = DummyWidget()
     window.verify_button = DummyWidget()
+    window.attest_button = DummyWidget()
     window.open_button = DummyWidget()
     window.copy_button = DummyWidget()
     window.app = SimpleNamespace(root=DummyRoot())
@@ -82,8 +84,10 @@ class DiagnosticsReleaseEvidenceGuiTests(unittest.TestCase):
             create_restore.assert_called_once_with(str(base))
             self.assertIs(window.check, prepared)
             self.assertIsNone(window.evidence_report)
+            self.assertIsNone(window.release_attestation)
             self.assertEqual(window.move_button.options["state"], "normal")
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertEqual(window.copy_button.options["state"], "normal")
 
     def test_move_reuses_bound_manifest_instead_of_raw_diagnostics_path(self):
@@ -105,6 +109,7 @@ class DiagnosticsReleaseEvidenceGuiTests(unittest.TestCase):
             self.assertIs(window.check, recycled)
             self.assertEqual(window.move_button.options["state"], "disabled")
             self.assertEqual(window.verify_button.options["state"], "normal")
+            self.assertEqual(window.attest_button.options["state"], "disabled")
 
     def test_verify_exports_and_freshly_validates_release_evidence_report(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,12 +136,64 @@ class DiagnosticsReleaseEvidenceGuiTests(unittest.TestCase):
             validate_report.assert_called_once_with(report, manifest=verified.manifest)
             self.assertIs(window.check, verified)
             self.assertEqual(window.evidence_report, report)
+            self.assertIsNone(window.release_attestation)
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.attest_button.options["state"], "normal")
             self.assertEqual(window.copy_button.options["state"], "normal")
             self.assertIn(str(report), window.recycle_status.value)
 
             window.copy_evidence_path()
             self.assertEqual(window.app.root.clipboard, str(report))
+
+    def test_attestation_requires_explicit_manual_restore_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            verified = fake_check(folder, stage="restored-verified")
+            report = folder / "recycle-evidence-report.json"
+            window = bare_window(verified)
+            window.evidence_report = report
+
+            with (
+                patch("photoclean.diagnostics_gui.messagebox.askyesno", return_value=False),
+                patch("photoclean.diagnostics_gui.write_packaged_attestation") as write_attestation,
+            ):
+                window.attest_check()
+
+            write_attestation.assert_not_called()
+            self.assertIsNone(window.release_attestation)
+
+    def test_attestation_writes_release_evidence_and_copy_prioritizes_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            verified = fake_check(folder, stage="restored-verified")
+            report = folder / "recycle-evidence-report.json"
+            attestation = folder / "RELEASE_EVIDENCE.json"
+            window = bare_window(verified)
+            window.evidence_report = report
+
+            with (
+                patch("photoclean.diagnostics_gui.messagebox.askyesno", return_value=True),
+                patch(
+                    "photoclean.diagnostics_gui.write_packaged_attestation",
+                    return_value=attestation,
+                ) as write_attestation,
+                patch("photoclean.diagnostics_gui.messagebox.showinfo") as show_info,
+            ):
+                window.attest_check()
+
+            write_attestation.assert_called_once_with(
+                report,
+                attestation,
+                confirm_manual_restore=True,
+            )
+            show_info.assert_called_once()
+            self.assertEqual(window.release_attestation, attestation)
+            self.assertEqual(window.attest_button.options["state"], "disabled")
+            self.assertIn("RELEASE_EVIDENCE", window.copy_button.options["text"])
+            self.assertIn(str(attestation), window.recycle_status.value)
+
+            window.copy_evidence_path()
+            self.assertEqual(window.app.root.clipboard, str(attestation))
 
     def test_copy_uses_manifest_until_final_report_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
