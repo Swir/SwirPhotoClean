@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ EVIDENCE_KIND = "windows-recycle-restore"
 ATTESTATION_NAME = "RELEASE_EVIDENCE.json"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_REPARSE_POINT_ATTRIBUTE = 0x400
 _REQUIRED_TRUE_FLAGS = (
     "physical_recycle_move_confirmed",
     "manual_restore_performed",
@@ -261,27 +263,77 @@ def build_packaged_attestation(
     return validate_packaged_attestation(payload)
 
 
+def _absolute_without_resolving(path: str | Path) -> Path:
+    """Return an absolute path while preserving the final filesystem entry."""
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _paths_alias(first: Path, second: Path) -> bool:
+    """Detect lexical aliases and existing hardlink/symlink aliases."""
+    first_text = os.path.normcase(os.path.abspath(os.fspath(first)))
+    second_text = os.path.normcase(os.path.abspath(os.fspath(second)))
+    if first_text == second_text:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _attestation_output_identity(path: Path) -> tuple[int, int, int, int, int] | None:
+    """Return output identity or fail closed for unsafe existing output entries."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise PackagedAttestationError(
+            f"cannot safely inspect RELEASE_EVIDENCE.json output path {path}: {error}"
+        ) from error
+
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json output must not be a symlink, junction or reparse point"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json output must be a regular file"
+        )
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
 def _validated_output_path(report_path: str | Path, output_path: str | Path) -> Path:
     """Return a safe attestation destination without aliasing source evidence files."""
     report = Path(report_path).expanduser().resolve()
-    output = Path(output_path).expanduser().resolve()
-    protected = {
+    output = _absolute_without_resolving(output_path)
+    protected = (
         report,
         report.parent / MANIFEST_NAME,
         report.parent / ORIGINAL_NAME,
         report.parent / COPY_NAME,
-    }
-    if output in protected:
+    )
+    if any(_paths_alias(output, source) for source in protected):
         raise PackagedAttestationError(
-            "RELEASE_EVIDENCE.json output cannot overwrite the evidence report, "
+            "RELEASE_EVIDENCE.json output cannot overwrite or alias the evidence report, "
             "manifest, or generated verification files"
         )
     return output
 
 
-def _write_validated_json_atomically(output: Path, payload: dict) -> None:
-    """Validate staged bytes before an atomic replace; never use a predictable temp path."""
-    output.parent.mkdir(parents=True, exist_ok=True)
+def _write_validated_json_atomically(
+    output: Path,
+    payload: dict,
+    expected_output_identity: tuple[int, int, int, int, int] | None,
+) -> None:
+    """Validate staged bytes and output identity before one atomic replace."""
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output.name}.",
         suffix=".tmp",
@@ -304,7 +356,16 @@ def _write_validated_json_atomically(output: Path, payload: dict) -> None:
             raise PackagedAttestationError(
                 "staged release evidence differs from validated attestation"
             )
-        temporary.replace(output)
+        if _attestation_output_identity(output) != expected_output_identity:
+            raise PackagedAttestationError(
+                "RELEASE_EVIDENCE.json output changed while validated bytes were staged"
+            )
+        try:
+            os.replace(temporary, output)
+        except OSError as error:
+            raise PackagedAttestationError(
+                f"cannot atomically replace RELEASE_EVIDENCE.json output: {error}"
+            ) from error
     finally:
         try:
             temporary.unlink(missing_ok=True)
@@ -323,7 +384,9 @@ def write_packaged_attestation(
         confirm_manual_restore=confirm_manual_restore,
     )
     output = _validated_output_path(report_path, output_path)
-    _write_validated_json_atomically(output, payload)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    expected_output_identity = _attestation_output_identity(output)
+    _write_validated_json_atomically(output, payload, expected_output_identity)
 
     try:
         written = json.loads(output.read_text(encoding="utf-8"))
@@ -335,4 +398,4 @@ def write_packaged_attestation(
         raise PackagedAttestationError(
             "written release evidence differs from validated attestation"
         )
-    return output
+    return output.resolve()
