@@ -4,6 +4,41 @@ import os
 from pathlib import Path
 
 
+_REPARSE_POINT_ATTRIBUTE = 0x400
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    """Return True for symbolic links, junctions and other reparse points."""
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return path.is_symlink() or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    )
+
+
+def _require_no_reparse_ancestry(path) -> Path:
+    """Reject recycle targets whose path crosses a link/reparse boundary.
+
+    ``Path.resolve()`` is intentionally not used here because resolving first would
+    hide the very junction/symlink boundary this safety check is meant to detect.
+    The production scanner already avoids reparse points; this is a second,
+    operation-time guard so stale state or an externally changed path still fails
+    closed before Windows receives a delete request.
+    """
+    candidate = Path(path).absolute()
+    current = candidate
+    while True:
+        if _is_link_or_reparse(current):
+            raise OSError(tr('Dowiązanie w ścieżce: {v0}', v0=str(current)))
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return candidate
+
+
 def recycle_file(path):
     if os.name != "nt":
         raise OSError(tr('Przenoszenie do kosza w tej wersji jest dostępne tylko na Windows.'))
@@ -13,7 +48,8 @@ def recycle_file(path):
     from win32com.server.exception import COMException
     from send2trash.win.IFileOperationProgressSink import FileOperationProgressSink
 
-    absolute = str(Path(path).absolute())
+    absolute_path = _require_no_reparse_ancestry(path)
+    absolute = str(absolute_path)
     volume = ctypes.create_unicode_buffer(32768)
     if not ctypes.windll.kernel32.GetVolumePathNameW(absolute, volume, len(volume)):
         raise OSError(tr('Nie można ustalić woluminu pliku.'))
