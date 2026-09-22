@@ -50,10 +50,12 @@ def bare_window(check=None):
     window.window = object()
     window.check = check
     window.evidence_report = None
+    window.release_attestation = None
     window.recycle_status = DummyVar()
     window.prepare_button = DummyWidget()
     window.move_button = DummyWidget()
     window.verify_button = DummyWidget()
+    window.attest_button = DummyWidget()
     window.open_button = DummyWidget()
     window.copy_button = DummyWidget()
     window.resume_button = DummyWidget()
@@ -81,6 +83,7 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
             self.assertIs(window.check, prepared)
             self.assertEqual(window.move_button.options["state"], "normal")
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertEqual(window.open_button.options["state"], "normal")
             self.assertEqual(window.copy_button.options["state"], "normal")
 
@@ -101,6 +104,7 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
             self.assertIs(window.check, recycled)
             self.assertEqual(window.move_button.options["state"], "disabled")
             self.assertEqual(window.verify_button.options["state"], "normal")
+            self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertIsNone(window.evidence_report)
 
     def test_resume_verified_session_revalidates_existing_report(self):
@@ -125,7 +129,9 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
 
             validate_report.assert_called_once_with(report, manifest=verified.manifest)
             self.assertEqual(window.evidence_report, report)
+            self.assertIsNone(window.release_attestation)
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.attest_button.options["state"], "normal")
             self.assertEqual(window.copy_button.options["state"], "normal")
             self.assertIn(str(report), window.recycle_status.value)
 
@@ -145,7 +151,9 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
 
             self.assertIs(window.check, verified)
             self.assertIsNone(window.evidence_report)
+            self.assertIsNone(window.release_attestation)
             self.assertEqual(window.verify_button.options["state"], "normal")
+            self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertIn("odtworzyć", window.recycle_status.value)
 
     def test_resume_rejects_manifest_from_different_safety_contract(self):

@@ -23,6 +23,11 @@ from .recycle_evidence import (
     validate_restore_evidence_report,
     verify_restore_evidence,
 )
+from .release_attestation import (
+    ATTESTATION_NAME,
+    PackagedAttestationError,
+    write_packaged_attestation,
+)
 from .space_hunter_gui import PhotoCleanApp as SpaceHunterPhotoCleanApp
 
 
@@ -55,9 +60,11 @@ DIAG_EN = {
     "Wznów test z manifestu…": "Resume test from manifest…",
     "Przenieś wygenerowaną kopię do Kosza": "Move generated copy to Recycle Bin",
     "Sprawdź przywróconą kopię": "Verify restored copy",
+    "Utwórz RELEASE_EVIDENCE…": "Create RELEASE_EVIDENCE…",
     "Otwórz folder testu": "Open test folder",
     "Kopiuj ścieżkę dowodu": "Copy evidence path",
     "Kopiuj ścieżkę raportu": "Copy report path",
+    "Kopiuj ścieżkę RELEASE_EVIDENCE": "Copy RELEASE_EVIDENCE path",
     "Zamknij": "Close",
     "Wybierz lokalny folder na pliki testowe": "Choose a local folder for generated test files",
     "Wybierz manifest testu Kosza": "Choose Recycle Bin evidence manifest",
@@ -71,6 +78,12 @@ DIAG_EN = {
     "Raport dowodu gotowy: {v0}": "Evidence report ready: {v0}",
     "Przywrócenie jest już potwierdzone. Kliknij „Sprawdź przywróconą kopię”, aby bez ponownego testu odtworzyć i zweryfikować raport dowodu.": "The restore is already verified. Click “Verify restored copy” to recreate and validate the evidence report without repeating the physical test.",
     "Potwierdzono przywrócenie identycznej kopii SHA-256 przy zachowaniu oryginału. Raport dowodu został ponownie zweryfikowany i jest gotowy do ręcznego przeglądu akceptacyjnego: {v0}": "Verified restoration of the identical SHA-256 copy while preserving the original. The evidence report was freshly validated and is ready for manual acceptance review: {v0}",
+    "Potwierdzenie ręcznego przywrócenia": "Manual restore confirmation",
+    "Potwierdzam, że ręcznie przywróciłem RECYCLE-ME.png z Kosza Windows. Program ponownie zweryfikuje raport i utworzy RELEASE_EVIDENCE.json. Ten krok nie zamyka checklisty STATUS.md ani nie publikuje wydania. Kontynuować?": "I confirm that I manually restored RECYCLE-ME.png from the Windows Recycle Bin. The app will revalidate the report and create RELEASE_EVIDENCE.json. This step does not close STATUS.md or publish a release. Continue?",
+    "Nie udało się utworzyć dowodu wydania": "Could not create release evidence",
+    "Dowód wydania gotowy": "Release evidence ready",
+    "RELEASE_EVIDENCE gotowy: {v0}": "RELEASE_EVIDENCE ready: {v0}",
+    "Utworzono i ponownie zweryfikowano RELEASE_EVIDENCE.json. Plik nadal zawiera acceptance_gate_closed=false i wymaga ręcznego przeglądu przed zmianą STATUS.md lub publikacją: {v0}": "Created and revalidated RELEASE_EVIDENCE.json. It still contains acceptance_gate_closed=false and requires manual review before changing STATUS.md or publishing: {v0}",
     "Brak aktywnego testu Kosza.": "No active Recycle Bin verification.",
     "Nie można otworzyć folderu": "Cannot open folder",
     "Brak ostrzeżeń z bieżącego skanu.": "No warnings from the current scan.",
@@ -91,6 +104,7 @@ class DiagnosticsWindow:
         self.snapshot = build_diagnostics_snapshot(app.result, len(app.marked))
         self.check: RecycleVerification | None = None
         self.evidence_report: Path | None = None
+        self.release_attestation: Path | None = None
 
         self.window = tk.Toplevel(app.root)
         self.window.title(diag_tr("Centrum diagnostyki"))
@@ -190,8 +204,23 @@ class DiagnosticsWindow:
         self.resume_button.pack(side="left")
         self.open_button = ttk.Button(secondary, text=diag_tr("Otwórz folder testu"), command=self.open_folder, state="disabled")
         self.open_button.pack(side="left", padx=8)
-        self.copy_button = ttk.Button(secondary, text=diag_tr("Kopiuj ścieżkę dowodu"), command=self.copy_evidence_path, state="disabled")
-        self.copy_button.pack(side="left")
+
+        release_row = ttk.Frame(parent)
+        release_row.pack(fill="x", pady=(8, 0))
+        self.attest_button = ttk.Button(
+            release_row,
+            text=diag_tr("Utwórz RELEASE_EVIDENCE…"),
+            command=self.attest_check,
+            state="disabled",
+        )
+        self.attest_button.pack(side="left")
+        self.copy_button = ttk.Button(
+            release_row,
+            text=diag_tr("Kopiuj ścieżkę dowodu"),
+            command=self.copy_evidence_path,
+            state="disabled",
+        )
+        self.copy_button.pack(side="left", padx=8)
 
     def _build_warnings(self, parent):
         if not self.app.result.warnings:
@@ -213,7 +242,11 @@ class DiagnosticsWindow:
 
         self.check = check
         self.evidence_report = report
+        self.release_attestation = None
         self.open_button.configure(state="normal")
+        self.attest_button.configure(
+            state="normal" if check.stage == "restored-verified" and report is not None else "disabled"
+        )
         self.copy_button.configure(
             text=diag_tr("Kopiuj ścieżkę raportu") if report is not None else diag_tr("Kopiuj ścieżkę dowodu"),
             state="normal",
@@ -322,6 +355,49 @@ class DiagnosticsWindow:
             parent=self.window,
         )
 
+    def attest_check(self):
+        if self.check is None or self.evidence_report is None:
+            return
+        if not messagebox.askyesno(
+            diag_tr("Potwierdzenie ręcznego przywrócenia"),
+            diag_tr(
+                "Potwierdzam, że ręcznie przywróciłem RECYCLE-ME.png z Kosza Windows. Program ponownie zweryfikuje raport i utworzy RELEASE_EVIDENCE.json. Ten krok nie zamyka checklisty STATUS.md ani nie publikuje wydania. Kontynuować?"
+            ),
+            parent=self.window,
+        ):
+            return
+
+        target = self.check.folder / ATTESTATION_NAME
+        try:
+            written = write_packaged_attestation(
+                self.evidence_report,
+                target,
+                confirm_manual_restore=True,
+            )
+        except (OSError, PackagedAttestationError, RecycleVerificationError) as error:
+            messagebox.showerror(
+                diag_tr("Nie udało się utworzyć dowodu wydania"),
+                str(error),
+                parent=self.window,
+            )
+            return
+
+        self.release_attestation = written
+        self.attest_button.configure(state="disabled")
+        self.copy_button.configure(
+            text=diag_tr("Kopiuj ścieżkę RELEASE_EVIDENCE"),
+            state="normal",
+        )
+        self.recycle_status.set(diag_tr("RELEASE_EVIDENCE gotowy: {v0}", v0=written))
+        messagebox.showinfo(
+            diag_tr("Dowód wydania gotowy"),
+            diag_tr(
+                "Utworzono i ponownie zweryfikowano RELEASE_EVIDENCE.json. Plik nadal zawiera acceptance_gate_closed=false i wymaga ręcznego przeglądu przed zmianą STATUS.md lub publikacją: {v0}",
+                v0=written,
+            ),
+            parent=self.window,
+        )
+
     def open_folder(self):
         if self.check is None:
             return
@@ -335,7 +411,7 @@ class DiagnosticsWindow:
     def copy_evidence_path(self):
         if self.check is None:
             return
-        target = self.evidence_report if self.evidence_report is not None else self.check.manifest
+        target = self.release_attestation or self.evidence_report or self.check.manifest
         self.app.root.clipboard_clear()
         self.app.root.clipboard_append(str(target))
 
