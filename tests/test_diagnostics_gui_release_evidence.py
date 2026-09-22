@@ -56,6 +56,7 @@ def bare_window(check=None):
     window.verify_button = DummyWidget()
     window.attest_button = DummyWidget()
     window.open_button = DummyWidget()
+    window.recycle_bin_button = DummyWidget()
     window.copy_button = DummyWidget()
     window.app = SimpleNamespace(root=DummyRoot())
     return window
@@ -87,6 +88,7 @@ class DiagnosticsReleaseEvidenceGuiTests(unittest.TestCase):
             self.assertIsNone(window.release_attestation)
             self.assertEqual(window.move_button.options["state"], "normal")
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.recycle_bin_button.options["state"], "disabled")
             self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertEqual(window.copy_button.options["state"], "normal")
 
@@ -109,6 +111,7 @@ class DiagnosticsReleaseEvidenceGuiTests(unittest.TestCase):
             self.assertIs(window.check, recycled)
             self.assertEqual(window.move_button.options["state"], "disabled")
             self.assertEqual(window.verify_button.options["state"], "normal")
+            self.assertEqual(window.recycle_bin_button.options["state"], "normal")
             self.assertEqual(window.attest_button.options["state"], "disabled")
 
     def test_verify_exports_and_freshly_validates_release_evidence_report(self):
@@ -138,6 +141,7 @@ class DiagnosticsReleaseEvidenceGuiTests(unittest.TestCase):
             self.assertEqual(window.evidence_report, report)
             self.assertIsNone(window.release_attestation)
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.recycle_bin_button.options["state"], "disabled")
             self.assertEqual(window.attest_button.options["state"], "normal")
             self.assertEqual(window.copy_button.options["state"], "normal")
             self.assertIn(str(report), window.recycle_status.value)
