@@ -12,9 +12,12 @@ from .diagnostics import (
     RecycleVerificationError,
     build_diagnostics_snapshot,
     inspect_recycle_support,
+    load_recycle_verification,
 )
 from .gui import BG
 from .recycle_evidence import (
+    REPORT_NAME,
+    _require_runtime_safety_contract,
     create_restore_evidence,
     move_restore_evidence,
     validate_restore_evidence_report,
@@ -49,6 +52,7 @@ DIAG_EN = {
     "zablokowany": "blocked",
     "Szczegóły": "Details",
     "Przygotuj pliki testowe…": "Prepare test files…",
+    "Wznów test z manifestu…": "Resume test from manifest…",
     "Przenieś wygenerowaną kopię do Kosza": "Move generated copy to Recycle Bin",
     "Sprawdź przywróconą kopię": "Verify restored copy",
     "Otwórz folder testu": "Open test folder",
@@ -56,6 +60,7 @@ DIAG_EN = {
     "Kopiuj ścieżkę raportu": "Copy report path",
     "Zamknij": "Close",
     "Wybierz lokalny folder na pliki testowe": "Choose a local folder for generated test files",
+    "Wybierz manifest testu Kosza": "Choose Recycle Bin evidence manifest",
     "Test Kosza wymaga lokalnego dysku stałego i dostępnych komponentów Windows.": "The Recycle Bin check requires a local fixed drive and available Windows components.",
     "Przygotowano test w: {v0}": "Prepared verification in: {v0}",
     "Przeniesienie testowej kopii": "Move generated test copy",
@@ -64,6 +69,7 @@ DIAG_EN = {
     "Kopia trafiła do Kosza, a oryginał pozostał na miejscu. Teraz przywróć RECYCLE-ME.png ręcznie z Kosza Windows do folderu testowego i kliknij „Sprawdź przywróconą kopię”.": "The copy reached the Recycle Bin and the original stayed in place. Restore RECYCLE-ME.png manually from the Windows Recycle Bin to the test folder, then click “Verify restored copy”.",
     "Przywracanie potwierdzone": "Restore verified",
     "Raport dowodu gotowy: {v0}": "Evidence report ready: {v0}",
+    "Przywrócenie jest już potwierdzone. Kliknij „Sprawdź przywróconą kopię”, aby bez ponownego testu odtworzyć i zweryfikować raport dowodu.": "The restore is already verified. Click “Verify restored copy” to recreate and validate the evidence report without repeating the physical test.",
     "Potwierdzono przywrócenie identycznej kopii SHA-256 przy zachowaniu oryginału. Raport dowodu został ponownie zweryfikowany i jest gotowy do ręcznego przeglądu akceptacyjnego: {v0}": "Verified restoration of the identical SHA-256 copy while preserving the original. The evidence report was freshly validated and is ready for manual acceptance review: {v0}",
     "Brak aktywnego testu Kosza.": "No active Recycle Bin verification.",
     "Nie można otworzyć folderu": "Cannot open folder",
@@ -176,10 +182,16 @@ class DiagnosticsWindow:
 
         secondary = ttk.Frame(parent)
         secondary.pack(fill="x")
+        self.resume_button = ttk.Button(
+            secondary,
+            text=diag_tr("Wznów test z manifestu…"),
+            command=self.resume_check,
+        )
+        self.resume_button.pack(side="left")
         self.open_button = ttk.Button(secondary, text=diag_tr("Otwórz folder testu"), command=self.open_folder, state="disabled")
-        self.open_button.pack(side="left")
+        self.open_button.pack(side="left", padx=8)
         self.copy_button = ttk.Button(secondary, text=diag_tr("Kopiuj ścieżkę dowodu"), command=self.copy_evidence_path, state="disabled")
-        self.copy_button.pack(side="left", padx=8)
+        self.copy_button.pack(side="left")
 
     def _build_warnings(self, parent):
         if not self.app.result.warnings:
@@ -195,6 +207,45 @@ class DiagnosticsWindow:
         text.insert("1.0", "\n".join(self.app.result.warnings))
         text.configure(state="disabled")
 
+    def _apply_check_state(self, check: RecycleVerification, report: Path | None = None):
+        if check.stage not in {"prepared", "recycled", "restored-verified"}:
+            raise RecycleVerificationError(f"Unsupported recycle verification stage: {check.stage}")
+
+        self.check = check
+        self.evidence_report = report
+        self.open_button.configure(state="normal")
+        self.copy_button.configure(
+            text=diag_tr("Kopiuj ścieżkę raportu") if report is not None else diag_tr("Kopiuj ścieżkę dowodu"),
+            state="normal",
+        )
+
+        if check.stage == "prepared":
+            self.move_button.configure(state="normal")
+            self.verify_button.configure(state="disabled")
+            self.recycle_status.set(diag_tr("Przygotowano test w: {v0}", v0=check.folder))
+            return
+
+        self.move_button.configure(state="disabled")
+        if check.stage == "recycled":
+            self.verify_button.configure(state="normal")
+            self.recycle_status.set(
+                diag_tr(
+                    "Kopia trafiła do Kosza, a oryginał pozostał na miejscu. Teraz przywróć RECYCLE-ME.png ręcznie z Kosza Windows do folderu testowego i kliknij „Sprawdź przywróconą kopię”."
+                )
+            )
+            return
+
+        if report is not None:
+            self.verify_button.configure(state="disabled")
+            self.recycle_status.set(diag_tr("Raport dowodu gotowy: {v0}", v0=report))
+        else:
+            self.verify_button.configure(state="normal")
+            self.recycle_status.set(
+                diag_tr(
+                    "Przywrócenie jest już potwierdzone. Kliknij „Sprawdź przywróconą kopię”, aby bez ponownego testu odtworzyć i zweryfikować raport dowodu."
+                )
+            )
+
     def prepare_check(self):
         base = filedialog.askdirectory(title=diag_tr("Wybierz lokalny folder na pliki testowe"), parent=self.window)
         if not base:
@@ -208,16 +259,31 @@ class DiagnosticsWindow:
             )
             return
         try:
-            self.check = create_restore_evidence(base)
+            check = create_restore_evidence(base)
+            self._apply_check_state(check)
         except (OSError, RecycleVerificationError) as error:
             messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
+
+    def resume_check(self):
+        manifest = filedialog.askopenfilename(
+            title=diag_tr("Wybierz manifest testu Kosza"),
+            parent=self.window,
+            filetypes=(("JSON", "*.json"), ("All files", "*.*")),
+        )
+        if not manifest:
             return
-        self.evidence_report = None
-        self.recycle_status.set(diag_tr("Przygotowano test w: {v0}", v0=self.check.folder))
-        self.move_button.configure(state="normal")
-        self.verify_button.configure(state="disabled")
-        self.open_button.configure(state="normal")
-        self.copy_button.configure(text=diag_tr("Kopiuj ścieżkę dowodu"), state="normal")
+        try:
+            check = load_recycle_verification(Path(manifest).expanduser().resolve())
+            _require_runtime_safety_contract(check)
+            report = None
+            if check.stage == "restored-verified":
+                candidate = check.folder / REPORT_NAME
+                if candidate.is_file():
+                    validate_restore_evidence_report(candidate, manifest=check.manifest)
+                    report = candidate
+            self._apply_check_state(check, report)
+        except (OSError, RecycleVerificationError) as error:
+            messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
 
     def move_check(self):
         if self.check is None:
@@ -231,17 +297,10 @@ class DiagnosticsWindow:
         ):
             return
         try:
-            self.check = move_restore_evidence(self.check.manifest)
+            check = move_restore_evidence(self.check.manifest)
+            self._apply_check_state(check)
         except (OSError, RecycleVerificationError) as error:
             messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
-            return
-        self.move_button.configure(state="disabled")
-        self.verify_button.configure(state="normal")
-        self.recycle_status.set(
-            diag_tr(
-                "Kopia trafiła do Kosza, a oryginał pozostał na miejscu. Teraz przywróć RECYCLE-ME.png ręcznie z Kosza Windows do folderu testowego i kliknij „Sprawdź przywróconą kopię”."
-            )
-        )
 
     def verify_check(self):
         if self.check is None:
@@ -249,15 +308,11 @@ class DiagnosticsWindow:
         try:
             verified, report = verify_restore_evidence(self.check.manifest)
             validate_restore_evidence_report(report, manifest=verified.manifest)
+            self._apply_check_state(verified, report)
         except (OSError, RecycleVerificationError) as error:
             messagebox.showerror(diag_tr("Nie udało się wykonać testu Kosza"), str(error), parent=self.window)
             return
 
-        self.check = verified
-        self.evidence_report = report
-        self.verify_button.configure(state="disabled")
-        self.copy_button.configure(text=diag_tr("Kopiuj ścieżkę raportu"), state="normal")
-        self.recycle_status.set(diag_tr("Raport dowodu gotowy: {v0}", v0=report))
         messagebox.showinfo(
             diag_tr("Przywracanie potwierdzone"),
             diag_tr(
