@@ -18,6 +18,26 @@ class LanguageTests(unittest.TestCase):
         for original, translated in i18n.EN.items():
             self.assertEqual(fields(original), fields(translated), original)
 
+    def test_recycle_safety_errors_are_translated(self):
+        i18n.language = 'en'
+        inspected = i18n.tr(
+            'Nie można bezpiecznie sprawdzić ścieżki przed Koszem: {v0}: {v1}',
+            v0='C:/photos/a.png',
+            v1='denied',
+        )
+        non_file = i18n.tr(
+            'Cel Kosza nie jest zwykłym plikiem: {v0}',
+            v0='C:/photos/a.png',
+        )
+        self.assertEqual(
+            inspected,
+            'Cannot safely inspect the path before recycling: C:/photos/a.png: denied',
+        )
+        self.assertEqual(
+            non_file,
+            'Recycle Bin target is not a regular file: C:/photos/a.png',
+        )
+
     def test_corrupt_missing_and_unknown_settings(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'settings.json'

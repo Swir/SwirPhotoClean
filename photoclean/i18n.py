@@ -62,6 +62,8 @@ EN = {
     "Odczytano {v0} zdjęć • {v1}": "Read {v0} photos • {v1}",
     "Porównywanie zdjęć • {v0}/{v1}": "Comparing photos • {v0}/{v1}",
     "Dowiązanie w ścieżce: {v0}": "Link in path: {v0}",
+    "Nie można bezpiecznie sprawdzić ścieżki przed Koszem: {v0}: {v1}": "Cannot safely inspect the path before recycling: {v0}: {v1}",
+    "Cel Kosza nie jest zwykłym plikiem: {v0}": "Recycle Bin target is not a regular file: {v0}",
     "Plik zmienił się: {v0}": "File changed: {v0}",
     "Zawartość pliku zmieniła się: {v0}": "File content changed: {v0}",
     "Plik niedostępny: {v0}: {v1}": "File unavailable: {v0}: {v1}",
