@@ -227,7 +227,7 @@ def build_release_evidence(
         raise ReleaseEvidenceError("recycle event does not prove the generated original was preserved")
     if restored.get("original_preserved") is not True:
         raise ReleaseEvidenceError("restore event does not preserve the generated original")
-    if restored.get("restored_copy_sha256") is not True:
+    if restored.get("restored_copy_matches_sha256") is not True:
         raise ReleaseEvidenceError("restore event does not verify the restored copy SHA-256")
     if restored.get("restored_copy_distinct") is not True:
         raise ReleaseEvidenceError("restore event does not prove the restored copy is physically distinct")
