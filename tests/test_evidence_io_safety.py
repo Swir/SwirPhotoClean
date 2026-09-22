@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,6 +95,9 @@ class EvidenceIOSafetyTests(unittest.TestCase):
     def test_install_rebinds_diagnostics_writer_and_exporter(self):
         old_writer = diagnostics._atomic_write_json
         old_exporter = diagnostics.export_recycle_evidence
+        recycle_module = sys.modules.get("photoclean.recycle_evidence")
+        old_cli_writer = getattr(recycle_module, "_atomic_write_json", None)
+        old_cli_exporter = getattr(recycle_module, "export_recycle_evidence", None)
         try:
             install_hardened_evidence_io()
             self.assertIs(diagnostics._atomic_write_json, hardened_atomic_write_json)
@@ -104,6 +108,9 @@ class EvidenceIOSafetyTests(unittest.TestCase):
         finally:
             diagnostics._atomic_write_json = old_writer
             diagnostics.export_recycle_evidence = old_exporter
+            if recycle_module is not None:
+                recycle_module._atomic_write_json = old_cli_writer
+                recycle_module.export_recycle_evidence = old_cli_exporter
 
     def test_application_bootstrap_installs_hardening_before_runtime_dispatch(self):
         run_py = Path(__file__).resolve().parents[1] / "run.py"
