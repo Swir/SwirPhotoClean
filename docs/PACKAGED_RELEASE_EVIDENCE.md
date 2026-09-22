@@ -105,6 +105,14 @@ The qualified release gate will revalidate it again. The Windows release
 workflow also compares the evidence contract with the packaged application,
 embeds the file in the ZIP, publishes it as a sidecar and verifies both copies.
 
+Release provenance schema 2 additionally binds the ZIP to the exact
+`safety_contract_sha256` and, when qualified runtime evidence is present, to the
+name, size and SHA-256 of `RELEASE_EVIDENCE.json`. A later code-contract change
+or evidence replacement therefore makes provenance verification fail closed
+instead of leaving a checksum/provenance record that only proves the ZIP bytes.
+Historical schema-1 provenance remains readable for older releases, but it
+cannot satisfy the new safety-contract/evidence binding.
+
 ## Safety rule
 
 Creating `RELEASE_EVIDENCE.json` is **not** permission to mark the remaining
