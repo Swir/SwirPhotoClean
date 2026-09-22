@@ -1,9 +1,9 @@
 """Bind qualified Windows evidence to the exact release-safety source contract.
 
 The contract is intentionally narrower than the whole repository: it covers the
-runtime cleanup path, Recycle evidence workflow, release identity/gate and Windows
-build recipe. A physical move/Restore verification is valid for a qualified
-release only while this contract stays unchanged.
+runtime cleanup path, Recycle evidence workflow, release identity/gate, the GUI
+attestation path and Windows build recipe. A physical move/Restore verification
+is valid for a qualified release only while this contract stays unchanged.
 """
 from __future__ import annotations
 
@@ -26,6 +26,9 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/__init__.py",
     "photoclean/core.py",
     "photoclean/diagnostics.py",
+    "photoclean/diagnostics_gui.py",
+    "photoclean/diagnostics_plus_gui.py",
+    "photoclean/folder_health_app.py",
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
     "photoclean/release_attestation.py",
