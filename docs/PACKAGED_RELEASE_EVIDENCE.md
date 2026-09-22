@@ -73,12 +73,21 @@ The command fails closed unless all of these are true:
 
 - the report matches the live tamper-evident manifest and a fresh fixture
   inspection;
+- the exact report bytes used for the attestation are first captured as one
+  immutable snapshot and that same snapshot is what the authoritative validator
+  checks; the attestation SHA-256 is calculated from those exact bytes rather
+  than from a second read of a mutable report path;
 - the manifest reached `restored-verified`;
 - the generated original stayed intact;
 - the restored copy matches the expected SHA-256 and is physically distinct;
 - the evidence says it came from frozen `SwirPhotoClean.exe` on Windows;
 - the report is bound to the exact runtime safety-contract SHA-256;
 - the manual Restore confirmation flag is explicitly present.
+
+This snapshot handoff removes the validation/attestation time-of-check gap: if
+the source report is changed after the snapshot is captured, those later bytes
+cannot silently replace the bytes that were validated and hashed into
+`RELEASE_EVIDENCE.json`.
 
 The sanitized JSON contains no local photo-library data and does not copy the
 generated PNG files or local evidence paths.
