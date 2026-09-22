@@ -57,6 +57,7 @@ def bare_window(check=None):
     window.verify_button = DummyWidget()
     window.attest_button = DummyWidget()
     window.open_button = DummyWidget()
+    window.recycle_bin_button = DummyWidget()
     window.copy_button = DummyWidget()
     window.resume_button = DummyWidget()
     window.app = SimpleNamespace(root=DummyRoot())
@@ -85,9 +86,10 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
             self.assertEqual(window.verify_button.options["state"], "disabled")
             self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertEqual(window.open_button.options["state"], "normal")
+            self.assertEqual(window.recycle_bin_button.options["state"], "disabled")
             self.assertEqual(window.copy_button.options["state"], "normal")
 
-    def test_resume_recycled_session_enables_verify_without_mutating_manifest(self):
+    def test_resume_recycled_session_enables_verify_and_manual_recycle_bin_navigation(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             manifest = folder / "recycle-verification.json"
@@ -104,8 +106,10 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
             self.assertIs(window.check, recycled)
             self.assertEqual(window.move_button.options["state"], "disabled")
             self.assertEqual(window.verify_button.options["state"], "normal")
+            self.assertEqual(window.recycle_bin_button.options["state"], "normal")
             self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertIsNone(window.evidence_report)
+            self.assertIn("Otwórz Kosz Windows", window.recycle_status.value)
 
     def test_resume_verified_session_revalidates_existing_report(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,6 +135,7 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
             self.assertEqual(window.evidence_report, report)
             self.assertIsNone(window.release_attestation)
             self.assertEqual(window.verify_button.options["state"], "disabled")
+            self.assertEqual(window.recycle_bin_button.options["state"], "disabled")
             self.assertEqual(window.attest_button.options["state"], "normal")
             self.assertEqual(window.copy_button.options["state"], "normal")
             self.assertIn(str(report), window.recycle_status.value)
@@ -153,8 +158,28 @@ class DiagnosticsResumeEvidenceTests(unittest.TestCase):
             self.assertIsNone(window.evidence_report)
             self.assertIsNone(window.release_attestation)
             self.assertEqual(window.verify_button.options["state"], "normal")
+            self.assertEqual(window.recycle_bin_button.options["state"], "disabled")
             self.assertEqual(window.attest_button.options["state"], "disabled")
             self.assertIn("odtworzyć", window.recycle_status.value)
+
+    def test_open_recycle_bin_is_navigation_only_and_requires_recycled_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            window = bare_window(fake_check(folder, "prepared"))
+            with patch("photoclean.diagnostics_gui.os.startfile", create=True) as startfile:
+                window.open_recycle_bin()
+            startfile.assert_not_called()
+
+    def test_open_recycle_bin_uses_windows_shell_namespace_for_recycled_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            window = bare_window(fake_check(folder, "recycled"))
+            with (
+                patch("photoclean.diagnostics_gui.os.name", "nt"),
+                patch("photoclean.diagnostics_gui.os.startfile", create=True) as startfile,
+            ):
+                window.open_recycle_bin()
+            startfile.assert_called_once_with("shell:RecycleBinFolder")
 
     def test_resume_rejects_manifest_from_different_safety_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
