@@ -1,9 +1,10 @@
-"""Bind qualified Windows evidence to the exact release-safety source contract.
+"""Bind qualified Windows evidence to the exact shipped Python runtime contract.
 
-The contract is intentionally narrower than the whole repository: it covers the
-runtime cleanup path, Recycle evidence workflow, release identity/gate, the GUI
-attestation path and Windows build recipe. A physical move/Restore verification
-is valid for a qualified release only while this contract stays unchanged.
+The contract covers the complete application runtime plus the release/build path
+that produces and validates the Windows package. A physical move/Restore
+verification is valid for a qualified release only while this contract stays
+unchanged. Documentation and acceptance bookkeeping stay outside the digest so
+they can record already-observed evidence without forcing another physical test.
 """
 from __future__ import annotations
 
@@ -18,25 +19,60 @@ KIND = "swir-photoclean-release-safety-contract"
 ASSET_NAME = "safety-contract.json"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
+# Keep the complete shipped Python runtime explicit and deterministic. Tests assert
+# that every top-level photoclean/*.py module is listed here, so adding a runtime
+# module cannot silently escape physical Windows evidence invalidation.
 SAFETY_CONTRACT_FILES = (
     ".github/workflows/windows.yml",
     "requirements.txt",
     "requirements-build.txt",
     "run.py",
     "photoclean/__init__.py",
+    "photoclean/bad_shots.py",
+    "photoclean/bad_shots_gui.py",
+    "photoclean/burst.py",
+    "photoclean/burst_gui.py",
+    "photoclean/classification.py",
+    "photoclean/classification_gui.py",
+    "photoclean/cleanup_history.py",
+    "photoclean/cleanup_history_gui.py",
+    "photoclean/compare_insights_gui.py",
     "photoclean/core.py",
     "photoclean/diagnostics.py",
     "photoclean/diagnostics_gui.py",
     "photoclean/diagnostics_plus_gui.py",
+    "photoclean/difference.py",
+    "photoclean/difference_gui.py",
+    "photoclean/exif_metadata.py",
     "photoclean/folder_health_app.py",
+    "photoclean/folder_health_gui.py",
+    "photoclean/fullscreen_plus_gui.py",
+    "photoclean/gui.py",
+    "photoclean/i18n.py",
+    "photoclean/insights.py",
+    "photoclean/library.py",
+    "photoclean/library_gui.py",
+    "photoclean/modern_theme.py",
+    "photoclean/performance.py",
+    "photoclean/performance_gui.py",
+    "photoclean/pro_gui.py",
+    "photoclean/quality.py",
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
     "photoclean/release_attestation.py",
     "photoclean/release_evidence_cli.py",
+    "photoclean/review_power.py",
+    "photoclean/review_power_gui.py",
+    "photoclean/safe_mode_gui.py",
     "photoclean/safety_contract.py",
+    "photoclean/scan_diagnostics.py",
     "photoclean/selftest.py",
     "photoclean/selftest_performance.py",
+    "photoclean/session.py",
+    "photoclean/space_hunter.py",
+    "photoclean/space_hunter_gui.py",
     "photoclean/storage.py",
+    "photoclean/windows_ui.py",
     "tools/release_evidence.py",
     "tools/release_gate.py",
     "tools/release_provenance.py",
@@ -64,7 +100,7 @@ def _contract_digest(payload: dict) -> str:
 
 
 def build_source_safety_contract(root: str | Path | None = None) -> dict:
-    """Hash the exact safety-critical source set from a repository checkout."""
+    """Hash the exact runtime/release source set from a repository checkout."""
     repository = (
         Path(root).expanduser().resolve()
         if root is not None

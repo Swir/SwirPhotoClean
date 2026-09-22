@@ -49,6 +49,19 @@ class SafetyContractTests(unittest.TestCase):
         }
         self.assertEqual(required - set(SAFETY_CONTRACT_FILES), set())
 
+    def test_contract_covers_every_top_level_runtime_python_module(self):
+        root = Path(__file__).resolve().parents[1]
+        runtime_modules = {
+            path.relative_to(root).as_posix()
+            for path in (root / "photoclean").glob("*.py")
+        }
+        missing = runtime_modules - set(SAFETY_CONTRACT_FILES)
+        self.assertEqual(
+            missing,
+            set(),
+            "new photoclean runtime modules must be added to SAFETY_CONTRACT_FILES",
+        )
+
     def test_source_contract_is_deterministic_and_changes_with_safety_file(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -66,6 +79,27 @@ class SafetyContractTests(unittest.TestCase):
             changed.write_text("changed safety behavior\n", encoding="utf-8")
             third = build_source_safety_contract(root)
             self.assertNotEqual(first["sha256"], third["sha256"])
+
+    def test_runtime_ui_session_and_theme_changes_invalidate_contract(self):
+        for relative in (
+            "photoclean/gui.py",
+            "photoclean/i18n.py",
+            "photoclean/modern_theme.py",
+            "photoclean/session.py",
+            "photoclean/burst_gui.py",
+            "photoclean/folder_health_gui.py",
+        ):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self._source_tree(root)
+                before = build_source_safety_contract(root)["sha256"]
+                target = root / relative
+                target.write_text(
+                    target.read_text(encoding="utf-8") + "changed\n",
+                    encoding="utf-8",
+                )
+                after = build_source_safety_contract(root)["sha256"]
+                self.assertNotEqual(before, after)
 
     def test_build_identity_dispatch_gui_attestation_and_provenance_changes_invalidate_contract(self):
         for relative in (
