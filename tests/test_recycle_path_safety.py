@@ -3,7 +3,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from photoclean.recycle import _require_no_reparse_ancestry, _require_regular_file_target
+from photoclean.recycle import (
+    _file_identity,
+    _require_no_reparse_ancestry,
+    _require_regular_file_target,
+    _require_same_regular_file_target,
+)
 
 
 class RecyclePathSafetyTests(unittest.TestCase):
@@ -32,6 +37,37 @@ class RecyclePathSafetyTests(unittest.TestCase):
 
             with self.assertRaisesRegex(OSError, "Cel Kosza nie jest zwykłym plikiem"):
                 _require_regular_file_target(candidate)
+
+    def test_identity_guard_accepts_unchanged_regular_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.write_bytes(b"safe")
+            expected = _file_identity(candidate)
+
+            checked = _require_same_regular_file_target(candidate, expected)
+
+            self.assertEqual(checked, candidate.absolute())
+
+    def test_identity_guard_rejects_content_mutation_before_shell_dispatch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.write_bytes(b"safe")
+            expected = _file_identity(candidate)
+            candidate.write_bytes(b"changed-and-longer")
+
+            with self.assertRaisesRegex(OSError, "Plik zmienił się"):
+                _require_same_regular_file_target(candidate, expected)
+
+    def test_identity_guard_rejects_path_replacement_before_shell_dispatch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / "photo.png"
+            candidate.write_bytes(b"original")
+            expected = _file_identity(candidate)
+            candidate.unlink()
+            candidate.write_bytes(b"replacement-with-different-size")
+
+            with self.assertRaisesRegex(OSError, "Plik zmienił się"):
+                _require_same_regular_file_target(candidate, expected)
 
     def test_missing_target_fails_closed_before_shell_recycle(self):
         with tempfile.TemporaryDirectory() as folder:
