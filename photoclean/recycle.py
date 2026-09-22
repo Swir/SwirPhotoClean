@@ -69,6 +69,26 @@ def _require_regular_file_target(path) -> Path:
     return candidate
 
 
+def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
+    """Return metadata used to detect a last-moment target replacement/mutation."""
+    info = _safe_lstat(path)
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _require_same_regular_file_target(path, expected_identity) -> Path:
+    """Fail closed if the recycle target changed since the safety snapshot."""
+    candidate = _require_regular_file_target(path)
+    if _file_identity(candidate) != expected_identity:
+        raise OSError(tr('Plik zmienił się: {v0}', v0=str(candidate)))
+    return candidate
+
+
 def recycle_file(path):
     if os.name != "nt":
         raise OSError(tr('Przenoszenie do kosza w tej wersji jest dostępne tylko na Windows.'))
@@ -79,6 +99,7 @@ def recycle_file(path):
     from send2trash.win.IFileOperationProgressSink import FileOperationProgressSink
 
     absolute_path = _require_regular_file_target(path)
+    expected_identity = _file_identity(absolute_path)
     absolute = str(absolute_path)
     volume = ctypes.create_unicode_buffer(32768)
     if not ctypes.windll.kernel32.GetVolumePathNameW(absolute, volume, len(volume)):
@@ -114,7 +135,9 @@ def recycle_file(path):
                                     shellcon.FOF_NOCONFIRMATION | shellcon.FOF_ALLOWUNDO | 0x00100000 |
                                     0x20000000 | 0x00080000)
         item = shell.SHCreateItemFromParsingName(absolute, None, shell.IID_IShellItem)
+        _require_same_regular_file_target(absolute_path, expected_identity)
         operation.DeleteItem(item, wrapped)
+        _require_same_regular_file_target(absolute_path, expected_identity)
         try:
             result = operation.PerformOperations()
         except pythoncom.com_error as error:
