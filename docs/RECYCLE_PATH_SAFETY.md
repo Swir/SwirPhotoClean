@@ -8,12 +8,16 @@ A recycle request is refused when the target itself or any existing component in
 
 The ancestry check is also **fail closed on metadata errors**. If the target disappears, a component cannot be inspected, or Windows denies metadata access, SWIR PhotoClean refuses the operation instead of assuming the path is a normal file. That keeps stale paths and permission races from reaching the Windows Shell delete request.
 
-This is an operation-time defense in depth. The scanner already skips reparse points and cloud-placeholder-style entries, but a path can change between scanning and cleanup or a generated Recycle/Restore evidence workspace can be placed below a redirected directory. The final recycle call therefore checks the ancestry again.
+## Regular-file boundary
 
-The existing fixed-local-drive gate remains mandatory after this check. Network/removable volumes are still blocked, Windows must explicitly report recycle semantics, the source must disappear after a successful operation, and there is no fallback to permanent deletion.
+Immediately before the Windows Shell request, the final recycle backend also requires the target itself to still be a **regular file**. A path that was a scanned photo but has since been replaced by a directory or another non-file filesystem object is rejected. This is deliberately enforced at the final production recycle boundary rather than relying only on the earlier scan/review state.
+
+This is an operation-time defense in depth. The scanner already skips reparse points and cloud-placeholder-style entries, but a path can change between scanning and cleanup or a generated Recycle/Restore evidence workspace can be placed below a redirected directory. The final recycle call therefore checks the ancestry and target type again.
+
+The existing fixed-local-drive gate remains mandatory after these checks. Network/removable volumes are still blocked, Windows must explicitly report recycle semantics, the source must disappear after a successful operation, and there is no fallback to permanent deletion.
 
 ## Release evidence impact
 
-The physical 1.0 Recycle/Restore test uses the same production `photoclean.recycle.recycle_file` backend, so the generated `RECYCLE-ME.png` cannot qualify evidence through an ambiguous reparse/junction path. If the check refuses the path, choose an ordinary folder on a local fixed drive and create a fresh evidence session there.
+The physical 1.0 Recycle/Restore test uses the same production `photoclean.recycle.recycle_file` backend, so the generated `RECYCLE-ME.png` cannot qualify evidence through an ambiguous reparse/junction path or after being replaced by a non-file object. If the check refuses the path, choose an ordinary folder on a local fixed drive and create a fresh evidence session there.
 
-Unit tests cover regular paths, missing targets, unreadable path metadata, target-level reparse rejection, ancestor-level rejection, and full ancestry traversal. The real Windows move/Restore acceptance item in `STATUS.md` remains unchanged and must still be completed physically before a qualified 1.0 release.
+Unit tests cover regular files, directory replacement rejection, missing targets, unreadable path metadata, target-level reparse rejection, ancestor-level rejection, and full ancestry traversal. The real Windows move/Restore acceptance item in `STATUS.md` remains unchanged and must still be completed physically before a qualified 1.0 release.
