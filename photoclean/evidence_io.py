@@ -49,6 +49,44 @@ def _paths_alias(first: Path, second: Path) -> bool:
         return False
 
 
+def _require_safe_directory_ancestry(directory: Path) -> None:
+    """Require every lexical output-directory ancestor to be a real directory.
+
+    Resolving the path would hide junction/symlink ancestry.  Walk the lexical
+    chain with ``lstat`` instead so an evidence write cannot be redirected through
+    a link or Windows reparse point.  The check is intentionally repeated around
+    staging/commit because these files are release-qualification evidence.
+    """
+    current = _absolute_without_resolving(directory)
+    chain: list[Path] = []
+    while True:
+        chain.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for entry in reversed(chain):
+        try:
+            info = entry.lstat()
+        except OSError as error:
+            raise diagnostics.RecycleVerificationError(
+                f"Cannot safely inspect evidence output directory {entry}: {error}"
+            ) from error
+
+        if stat.S_ISLNK(info.st_mode) or bool(
+            getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+        ):
+            raise diagnostics.RecycleVerificationError(
+                "Evidence output directory ancestry must not contain symlinks, "
+                f"junctions or reparse points: {entry}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise diagnostics.RecycleVerificationError(
+                f"Evidence output directory ancestry contains a non-directory entry: {entry}"
+            )
+
+
 def _safe_output_identity(path: Path) -> OutputIdentity | None:
     """Snapshot an existing output entry or reject unsafe filesystem objects.
 
@@ -96,14 +134,16 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
 
     The function mirrors the historical diagnostics writer contract, including
     automatic manifest fingerprinting, but never opens the destination for
-    in-place writes.  The destination identity is checked before staging and
-    immediately before replacement so an intervening path swap fails closed.
+    in-place writes.  The destination entry and its lexical directory ancestry
+    are checked before staging and again immediately before replacement so an
+    intervening path or parent-directory swap fails closed.
     """
     target = _absolute_without_resolving(path)
     normalized = dict(payload)
     if normalized.get("version") == diagnostics.MANIFEST_VERSION:
         normalized["manifest_fingerprint"] = diagnostics._payload_fingerprint(normalized)
 
+    _require_safe_directory_ancestry(target.parent)
     expected_identity = _safe_output_identity(target)
     raw = json.dumps(normalized, ensure_ascii=False, indent=2).encode("utf-8")
     # JSON normalizes tuples (for example inspection.problems) to arrays.  Compare
@@ -111,6 +151,7 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
     # pre-serialization Python container types.
     expected_payload = json.loads(raw.decode("utf-8"))
 
+    _require_safe_directory_ancestry(target.parent)
     try:
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{target.name}.",
@@ -150,6 +191,7 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
                 "Staged evidence JSON does not match the validated payload"
             )
 
+        _require_safe_directory_ancestry(target.parent)
         if _safe_output_identity(target) != expected_identity:
             raise diagnostics.RecycleVerificationError(
                 "Evidence output changed while validated bytes were staged"
