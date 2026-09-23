@@ -101,8 +101,16 @@ editing it. From a source checkout it can still be verified with:
 py -3.12 tools\release_evidence.py verify
 ```
 
-The qualified release gate will revalidate it again. The Windows release
-workflow also compares the evidence contract with the packaged application,
+The command above validates the JSON schema and safety-contract binding. Before
+that evidence can authorize a qualified publication, `tools\release_gate.py`
+adds a stricter filesystem intake: it reads at most 64 KiB from one verified
+regular-file handle and requires the identity to remain unchanged before, during
+and after the read. Symlinks, junctions/reparse points, hardlinks, non-regular
+files, oversized inputs and path swaps are rejected before the payload is passed
+to the evidence validator.
+
+The qualified release gate then revalidates the captured payload. The Windows
+release workflow also compares the evidence contract with the packaged application,
 embeds the file in the ZIP, publishes it as a sidecar and verifies both copies.
 
 Release provenance schema 2 additionally binds the ZIP to the exact
