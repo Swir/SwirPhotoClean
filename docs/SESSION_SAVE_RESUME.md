@@ -10,6 +10,8 @@ It does **not** store image bytes, Recycle Bin state, cleanup history as an inst
 
 Session writes are atomic: the payload is written to a temporary file, flushed, and then replaced into the destination. The loader applies strict format, version, size, count and reference validation before returning a snapshot.
 
+Session saving also fails closed if the selected destination is, or aliases, any scanned photo. An existing destination must be a regular non-reparse file with a single filesystem link, and its identity is checked again after staging before atomic replacement. This prevents a session save from replacing source image bytes or silently following a destination that was swapped while the payload was being prepared.
+
 The loader enforces the session byte limit while reading from one open file handle instead of trusting a separate size check followed by an unbounded text read. A session that grows or is replaced between metadata inspection and reading therefore cannot bypass `MAX_SESSION_BYTES` and force an unexpectedly large allocation.
 
 ## Resume freshness preflight
