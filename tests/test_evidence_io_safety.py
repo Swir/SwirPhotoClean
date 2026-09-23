@@ -75,6 +75,27 @@ class EvidenceIOSafetyTests(unittest.TestCase):
             self.assertTrue(target.is_symlink())
             self.assertTrue(verified.original.is_file())
 
+    def test_symlink_parent_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            linked_parent = root / "linked-parent"
+            try:
+                linked_parent.symlink_to(real_parent, target_is_directory=True)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"directory symlinks unavailable: {error}")
+
+            target = linked_parent / "evidence.json"
+            with self.assertRaisesRegex(
+                diagnostics.RecycleVerificationError,
+                "directory ancestry",
+            ):
+                hardened_atomic_write_json(target, {"safe": True})
+
+            self.assertFalse((real_parent / "evidence.json").exists())
+            self.assertEqual(list(real_parent.glob(".evidence.json.*.tmp")), [])
+
     def test_output_creation_during_staging_fails_closed(self):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "evidence.json"
@@ -91,6 +112,27 @@ class EvidenceIOSafetyTests(unittest.TestCase):
             self.assertFalse(target.exists())
             leftovers = list(Path(folder).glob(".evidence.json.*.tmp"))
             self.assertEqual(leftovers, [])
+
+    def test_directory_ancestry_is_rechecked_before_atomic_replace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "evidence.json"
+            ancestry_error = diagnostics.RecycleVerificationError(
+                "Evidence output directory ancestry changed before commit"
+            )
+
+            with mock.patch(
+                "photoclean.evidence_io._require_safe_directory_ancestry",
+                side_effect=[None, None, ancestry_error],
+            ) as ancestry_check:
+                with self.assertRaisesRegex(
+                    diagnostics.RecycleVerificationError,
+                    "directory ancestry changed before commit",
+                ):
+                    hardened_atomic_write_json(target, {"safe": True})
+
+            self.assertEqual(ancestry_check.call_count, 3)
+            self.assertFalse(target.exists())
+            self.assertEqual(list(Path(folder).glob(".evidence.json.*.tmp")), [])
 
     def test_install_rebinds_diagnostics_writer_and_exporter(self):
         old_writer = diagnostics._atomic_write_json
