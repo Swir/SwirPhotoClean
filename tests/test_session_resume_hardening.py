@@ -163,8 +163,12 @@ class SessionResumeHardeningTests(unittest.TestCase):
                 result=ScanResult(photos=[photo]),
             )
 
-            with patch.object(Path, "stat", side_effect=[current, replacement]):
-                audit = audit_session_snapshot(snapshot)
+            # ``Path.lstat`` is implemented via ``Path.stat(follow_symlinks=False)``
+            # on Windows. Keep ancestry inspection deterministic here so the two
+            # mocked stat results model only the before/while-open path snapshots.
+            with patch("photoclean.session.linked", return_value=False):
+                with patch.object(Path, "stat", side_effect=[current, replacement]):
+                    audit = audit_session_snapshot(snapshot)
 
             self.assertEqual(audit.valid_count, 0)
             self.assertEqual(audit.changed_count, 1)
