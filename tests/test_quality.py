@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from PIL import Image, ImageFilter, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 from photoclean.core import Group, Photo
 from photoclean.quality import assess_photo, recommend_keeper_with_quality
@@ -121,6 +122,76 @@ class PhotoQualityTests(unittest.TestCase):
         result = assess_photo(missing)
         self.assertFalse(result.available)
         self.assertTrue(result.error)
+
+    def test_cached_quality_is_not_reused_after_file_disappears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cached.png"
+            checkerboard().save(path)
+            photo = as_photo(path, digest="1" * 64)
+
+            first = assess_photo(photo)
+            self.assertTrue(first.available)
+            path.unlink()
+
+            second = assess_photo(photo)
+            self.assertFalse(second.available)
+            self.assertTrue(second.error)
+
+    def test_transient_read_failure_does_not_poison_quality_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "flaky.png"
+            checkerboard().save(path)
+            photo = as_photo(path, digest="4" * 64)
+            real_image_open = Image.open
+            attempts = 0
+
+            def flaky_open(*args, **kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise OSError("temporary sharing violation")
+                return real_image_open(*args, **kwargs)
+
+            with patch("photoclean.quality.Image.open", side_effect=flaky_open):
+                first = assess_photo(photo)
+                second = assess_photo(photo)
+
+            self.assertFalse(first.available)
+            self.assertIn("temporary sharing violation", first.error)
+            self.assertTrue(second.available)
+            self.assertEqual(attempts, 2)
+
+    def test_changed_scan_identity_is_rejected_before_quality_recommendation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "changed.png"
+            checkerboard().save(path)
+            photo = as_photo(path, digest="2" * 64)
+            self.assertTrue(assess_photo(photo).available)
+
+            Image.new("RGB", (32, 32), "black").save(path)
+            changed = assess_photo(photo)
+
+            self.assertFalse(changed.available)
+            self.assertIn("changed", changed.error)
+
+    def test_large_quality_source_is_bounded_before_orientation_and_grayscale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large.png"
+            Image.new("RGB", (1600, 1200), (90, 130, 170)).save(path)
+            photo = as_photo(path, digest="3" * 64)
+            observed_sizes = []
+            real_exif_transpose = ImageOps.exif_transpose
+
+            def observe(image):
+                observed_sizes.append(image.size)
+                return real_exif_transpose(image)
+
+            with patch("photoclean.quality.ImageOps.exif_transpose", side_effect=observe):
+                result = assess_photo(photo, max_side=128)
+
+            self.assertTrue(result.available)
+            self.assertTrue(observed_sizes)
+            self.assertLessEqual(max(observed_sizes[0]), 128)
 
 
 if __name__ == "__main__":

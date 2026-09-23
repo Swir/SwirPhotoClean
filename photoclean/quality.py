@@ -7,6 +7,8 @@ shot.
 """
 from __future__ import annotations
 
+import stat
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -73,22 +75,77 @@ def _format_score(path: Path) -> float:
     return _FORMAT_SCORE.get(path.suffix.lower(), 45.0)
 
 
-@lru_cache(maxsize=512)
-def assess_photo(photo: Photo, max_side: int = 384) -> PhotoQuality:
-    """Analyze sharpness/exposure on a bounded sample of the current file.
+def _unavailable(photo: Photo, error: object) -> PhotoQuality:
+    return PhotoQuality(
+        photo=photo,
+        available=False,
+        overall_score=0.0,
+        sharpness_score=0.0,
+        exposure_score=0.0,
+        dark_clip_percent=0.0,
+        light_clip_percent=0.0,
+        mean_luma=0.0,
+        notes=("unavailable",),
+        error=str(error),
+    )
 
-    The complete image may still need to be decoded by Pillow, but all scoring
-    work is performed on a bounded grayscale thumbnail. Failures are returned as
-    unavailable quality evidence instead of breaking the review workflow.
+
+def _unsafe_path(info) -> bool:
+    """Reject path indirection that the scanner itself does not accept."""
+
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
+def _scan_identity_matches(photo: Photo, info) -> bool:
+    """Cheaply verify that review still points at the scanned filesystem object."""
+
+    if info.st_size != photo.size or info.st_mtime_ns != photo.modified_ns:
+        return False
+    current_device = int(getattr(info, "st_dev", 0) or 0)
+    current_inode = int(getattr(info, "st_ino", 0) or 0)
+    if photo.device and current_device and current_device != photo.device:
+        return False
+    if photo.inode and current_inode and current_inode != photo.inode:
+        return False
+    return True
+
+
+def _quality_sample(source: Image.Image, max_side: int) -> Image.Image:
+    """Create the bounded grayscale sample before allocating full-size conversions.
+
+    Pillow may still need to decode the source format, but for codecs that support
+    ``draft`` (notably JPEG) the decoder can reduce work up front. More importantly,
+    orientation and grayscale conversion now operate on a bounded image instead of
+    creating another full-resolution pixel buffer solely for a 384 px review score.
     """
 
-    if max_side < 64 or max_side > 1024:
-        raise ValueError("max_side must be between 64 and 1024")
+    if source.width > max_side or source.height > max_side:
+        try:
+            source.draft(source.mode, (max_side, max_side))
+        except (AttributeError, OSError, ValueError):
+            pass
+        source.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
 
-    try:
+    oriented = ImageOps.exif_transpose(source)
+    image = oriented if oriented.mode == "L" else oriented.convert("L")
+    if image.width > max_side or image.height > max_side:
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+    return image
+
+
+@lru_cache(maxsize=512)
+def _assess_photo_cached(photo: Photo, max_side: int) -> PhotoQuality:
+    """Compute one successful quality score after scan-identity validation.
+
+    Read/decode failures intentionally propagate to the public wrapper. ``lru_cache``
+    does not cache exceptions, so a transient sharing/decoder error cannot poison
+    the review session with a permanently unavailable result for an unchanged file.
+    """
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(photo.path) as source:
-            image = ImageOps.exif_transpose(source).convert("L")
-            image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            image = _quality_sample(source, max_side)
             if image.width < 3 or image.height < 3:
                 raise ValueError("image sample is too small")
 
@@ -137,19 +194,58 @@ def assess_photo(photo: Photo, max_side: int = 384) -> PhotoQuality:
                 mean_luma=round(mean_luma, 2),
                 notes=tuple(notes),
             )
+
+
+def assess_photo(photo: Photo, max_side: int = 384) -> PhotoQuality:
+    """Analyze sharpness/exposure on a bounded, scan-identity-checked sample.
+
+    Successful review scores are cached, but the path is revalidated before and
+    after every access so a removed, replaced, relinked or otherwise changed scan
+    result cannot keep serving stale quality evidence. Transient read/decode errors
+    are returned as unavailable without entering the cache. This is a review guard,
+    not a replacement for the full SHA-256 revalidation used by Recycle Bin cleanup.
+    """
+
+    if max_side < 64 or max_side > 1024:
+        raise ValueError("max_side must be between 64 and 1024")
+
+    try:
+        before = photo.path.lstat()
+    except OSError as error:
+        return _unavailable(photo, error)
+    if _unsafe_path(before) or not _scan_identity_matches(photo, before):
+        return _unavailable(photo, "file changed or became unsafe since scan")
+
+    try:
+        assessment = _assess_photo_cached(photo, max_side)
     except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
-        return PhotoQuality(
-            photo=photo,
-            available=False,
-            overall_score=0.0,
-            sharpness_score=0.0,
-            exposure_score=0.0,
-            dark_clip_percent=0.0,
-            light_clip_percent=0.0,
-            mean_luma=0.0,
-            notes=("unavailable",),
-            error=str(error),
-        )
+        return _unavailable(photo, error)
+
+    try:
+        after = photo.path.lstat()
+    except OSError as error:
+        return _unavailable(photo, error)
+    before_identity = (
+        before.st_size,
+        before.st_mtime_ns,
+        getattr(before, "st_dev", 0),
+        getattr(before, "st_ino", 0),
+        getattr(before, "st_file_attributes", 0),
+    )
+    after_identity = (
+        after.st_size,
+        after.st_mtime_ns,
+        getattr(after, "st_dev", 0),
+        getattr(after, "st_ino", 0),
+        getattr(after, "st_file_attributes", 0),
+    )
+    if (
+        before_identity != after_identity
+        or _unsafe_path(after)
+        or not _scan_identity_matches(photo, after)
+    ):
+        return _unavailable(photo, "file changed during quality analysis")
+    return assessment
 
 
 def recommend_keeper_with_quality(
