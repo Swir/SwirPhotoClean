@@ -3,11 +3,28 @@ from .i18n import tr
 import hashlib
 import os
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 
 
 _REPARSE_POINT_ATTRIBUTE = 0x400
 _HASH_CHUNK_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class RecycleReceipt:
+    """Receipt returned only after Windows confirms a recycle-only move.
+
+    ``source_device`` and ``source_inode`` describe the exact filesystem object
+    handed to the Shell operation. ``recycled_shell_path`` is the parsing name
+    reported by Windows for the newly-created Recycle Bin item. Release evidence
+    can use this to distinguish a real restore from a byte-identical recreated
+    file without weakening the normal cleanup path.
+    """
+
+    source_device: int
+    source_inode: int
+    recycled_shell_path: str
 
 
 def _safe_lstat(path: Path):
@@ -153,6 +170,7 @@ def recycle_file(path):
             super().__init__()
             self.error = None
             self.recycled = False
+            self.newItem = ""
 
         def PreDeleteItem(self, flags, item):
             if not flags & shellcon.TSF_DELETE_RECYCLE_IF_POSSIBLE:
@@ -189,5 +207,10 @@ def recycle_file(path):
             raise OSError(tr('Windows nie zwrócił potwierdzenia umieszczenia pliku w koszu.'))
         if Path(absolute).exists():
             raise OSError(tr('Plik pozostał na miejscu; kosz nie potwierdził przeniesienia.'))
+        return RecycleReceipt(
+            source_device=expected_identity[0],
+            source_inode=expected_identity[1],
+            recycled_shell_path=str(sink.newItem or ""),
+        )
     finally:
         pythoncom.CoUninitialize()
