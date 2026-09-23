@@ -7,6 +7,7 @@ release-candidate EXE. It never closes the repository acceptance gate itself.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
@@ -30,6 +31,17 @@ WORKSPACE_NAME = "SwirPhotoClean-Recycle-Restore-Test"
 SAFETY_CONTRACT_FIELD = "safety_contract_sha256"
 RECYCLE_RECEIPT_FIELD = "recycle_receipt"
 RECYCLE_RECEIPT_VERSION = 1
+
+
+def _absolute_without_resolving(path: str | os.PathLike) -> Path:
+    """Return an absolute lexical path without following symlinks/junctions.
+
+    Release-evidence intake is hardened later by :mod:`photoclean.evidence_io`.
+    Passing it a pre-resolved path would erase the original ancestry and could
+    hide a symlink/junction/reparse component before the hardened loader has a
+    chance to reject it.
+    """
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
 
 
 def default_workspace() -> Path:
@@ -195,7 +207,7 @@ def create_restore_evidence(
     workspace: str | Path | None = None,
 ) -> RecycleVerification:
     """Create a fresh generated fixture bound to the current release safety contract."""
-    base = Path(workspace).expanduser().resolve() if workspace is not None else default_workspace()
+    base = _absolute_without_resolving(workspace) if workspace is not None else default_workspace()
     base.mkdir(parents=True, exist_ok=True)
     check = create_recycle_verification(base)
     return _bind_runtime_safety_contract(check)
@@ -212,7 +224,7 @@ def move_restore_evidence(
     fingerprints that receipt into the evidence manifest so a later restore can be
     tied to the same filesystem object rather than only to matching bytes.
     """
-    check = load_recycle_verification(Path(manifest).expanduser().resolve())
+    check = load_recycle_verification(_absolute_without_resolving(manifest))
     _require_runtime_safety_contract(check)
     recycle_action = recycler if recycler is not None else recycle_file
     captured: list[object] = []
@@ -251,7 +263,7 @@ def verify_restore_evidence(
     the verify command again revalidates the already-verified fixture and exports
     the report without adding another stage event.
     """
-    check = load_recycle_verification(Path(manifest).expanduser().resolve())
+    check = load_recycle_verification(_absolute_without_resolving(manifest))
     _require_runtime_safety_contract(check)
     identity_continuity = _require_restored_receipt_identity(check)
     if check.stage == "recycled":
@@ -268,7 +280,7 @@ def verify_restore_evidence(
         )
 
     destination = (
-        Path(report_path).expanduser().resolve()
+        _absolute_without_resolving(report_path)
         if report_path is not None
         else verified.folder / REPORT_NAME
     )
@@ -293,7 +305,7 @@ def validate_restore_evidence_report(
     level to a fresh validation of the current fixture. The helper never flips
     the repository acceptance gate.
     """
-    report = Path(report_path).expanduser().resolve()
+    report = _absolute_without_resolving(report_path)
     try:
         payload = json.loads(report.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -312,7 +324,7 @@ def validate_restore_evidence_report(
         raise RecycleVerificationError("Recycle evidence report is missing manifest or inspection data")
 
     manifest_path = (
-        Path(manifest).expanduser().resolve()
+        _absolute_without_resolving(manifest)
         if manifest is not None
         else report.parent / "recycle-verification.json"
     )
@@ -374,7 +386,7 @@ def _print_move_success(check: RecycleVerification) -> None:
 
 
 def _print_status(manifest: str | Path) -> int:
-    manifest_path = Path(manifest).expanduser().resolve()
+    manifest_path = _absolute_without_resolving(manifest)
     check = load_recycle_verification(manifest_path)
     _require_runtime_safety_contract(check)
     inspection = inspect_recycle_evidence(check)
