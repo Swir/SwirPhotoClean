@@ -22,11 +22,14 @@ from .diagnostics import (
     move_generated_copy_to_recycle,
     verify_restored_copy,
 )
+from .recycle import RecycleReceipt, recycle_file
 from .safety_contract import SafetyContractError, runtime_safety_contract_sha256
 
 REPORT_NAME = "recycle-evidence-report.json"
 WORKSPACE_NAME = "SwirPhotoClean-Recycle-Restore-Test"
 SAFETY_CONTRACT_FIELD = "safety_contract_sha256"
+RECYCLE_RECEIPT_FIELD = "recycle_receipt"
+RECYCLE_RECEIPT_VERSION = 1
 
 
 def default_workspace() -> Path:
@@ -97,6 +100,97 @@ def _require_runtime_safety_contract(check: RecycleVerification) -> str:
     return recorded
 
 
+def _receipt_payload(receipt: RecycleReceipt) -> dict:
+    return {
+        "version": RECYCLE_RECEIPT_VERSION,
+        "source_device": int(receipt.source_device),
+        "source_inode": int(receipt.source_inode),
+        "recycled_shell_path": str(receipt.recycled_shell_path or ""),
+    }
+
+
+def _validated_receipt(payload: dict) -> dict | None:
+    receipt = payload.get(RECYCLE_RECEIPT_FIELD)
+    if receipt is None:
+        return None
+    expected_fields = {
+        "version",
+        "source_device",
+        "source_inode",
+        "recycled_shell_path",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != expected_fields:
+        raise RecycleVerificationError("Recycle receipt is malformed")
+    if receipt.get("version") != RECYCLE_RECEIPT_VERSION:
+        raise RecycleVerificationError("Unsupported recycle receipt version")
+    device = receipt.get("source_device")
+    inode = receipt.get("source_inode")
+    shell_path = receipt.get("recycled_shell_path")
+    if (
+        not isinstance(device, int)
+        or isinstance(device, bool)
+        or device < 0
+        or not isinstance(inode, int)
+        or isinstance(inode, bool)
+        or inode < 0
+        or not isinstance(shell_path, str)
+    ):
+        raise RecycleVerificationError("Recycle receipt contains invalid filesystem identity")
+    return dict(receipt)
+
+
+def _record_recycle_receipt(
+    check: RecycleVerification,
+    receipt: RecycleReceipt,
+) -> RecycleVerification:
+    """Persist the Windows Shell receipt inside the fingerprinted manifest."""
+    payload = _read_manifest_payload(check)
+    if payload.get("stage") != "recycled":
+        raise RecycleVerificationError("Recycle receipt can only be recorded in recycled stage")
+    normalized = _receipt_payload(receipt)
+    existing = payload.get(RECYCLE_RECEIPT_FIELD)
+    if existing is not None and existing != normalized:
+        raise RecycleVerificationError("Recycle verification already contains a different receipt")
+    events = payload.get("events")
+    if not isinstance(events, list) or not events or not isinstance(events[-1], dict):
+        raise RecycleVerificationError("Recycle verification event log is unavailable")
+    if events[-1].get("stage") != "recycled":
+        raise RecycleVerificationError("Recycle receipt does not match the current event stage")
+    payload[RECYCLE_RECEIPT_FIELD] = normalized
+    events[-1][RECYCLE_RECEIPT_FIELD] = normalized
+    _atomic_write_json(check.manifest, payload)
+    return load_recycle_verification(check.manifest)
+
+
+def _require_restored_receipt_identity(check: RecycleVerification) -> bool:
+    """Prove that a restored file is the same filesystem object moved by Shell.
+
+    Legacy/source tests that use an injected recycler and do not return a
+    :class:`RecycleReceipt` remain valid but cannot claim object-identity
+    continuity. A real packaged Windows move returns a receipt. On filesystems
+    exposing a non-zero inode/file index, restore verification then rejects a
+    byte-identical replacement that was recreated after the move.
+    """
+    payload = _read_manifest_payload(check)
+    receipt = _validated_receipt(payload)
+    if receipt is None or receipt["source_inode"] <= 0:
+        return False
+    try:
+        info = check.copy.stat()
+    except OSError as error:
+        raise RecycleVerificationError(
+            f"Restored verification copy is unavailable for identity continuity: {error}"
+        ) from error
+    restored_identity = (int(info.st_dev), int(info.st_ino))
+    expected_identity = (receipt["source_device"], receipt["source_inode"])
+    if restored_identity != expected_identity:
+        raise RecycleVerificationError(
+            "Restored verification copy is byte-compatible but is not the same "
+            "filesystem object that Windows moved to the Recycle Bin"
+        )
+    return True
+
+
 def create_restore_evidence(
     workspace: str | Path | None = None,
 ) -> RecycleVerification:
@@ -112,10 +206,26 @@ def move_restore_evidence(
     *,
     recycler: Callable[[str], object] | None = None,
 ) -> RecycleVerification:
-    """Retry or perform the guarded Recycle Bin move for an existing prepared fixture."""
+    """Retry or perform the guarded Recycle Bin move for an existing prepared fixture.
+
+    The production Windows recycler returns a :class:`RecycleReceipt`. The adapter
+    fingerprints that receipt into the evidence manifest so a later restore can be
+    tied to the same filesystem object rather than only to matching bytes.
+    """
     check = load_recycle_verification(Path(manifest).expanduser().resolve())
     _require_runtime_safety_contract(check)
-    return move_generated_copy_to_recycle(check, recycler=recycler)
+    recycle_action = recycler if recycler is not None else recycle_file
+    captured: list[object] = []
+
+    def capture_receipt(path: str) -> object:
+        result = recycle_action(path)
+        captured.append(result)
+        return result
+
+    moved = move_generated_copy_to_recycle(check, recycler=capture_receipt)
+    if captured and isinstance(captured[-1], RecycleReceipt):
+        moved = _record_recycle_receipt(moved, captured[-1])
+    return moved
 
 
 def prepare_restore_evidence(
@@ -125,7 +235,7 @@ def prepare_restore_evidence(
 ) -> RecycleVerification:
     """Create generated fixtures and move only RECYCLE-ME.png to Recycle Bin."""
     check = create_restore_evidence(workspace)
-    return move_generated_copy_to_recycle(check, recycler=recycler)
+    return move_restore_evidence(check.manifest, recycler=recycler)
 
 
 def verify_restore_evidence(
@@ -143,6 +253,7 @@ def verify_restore_evidence(
     """
     check = load_recycle_verification(Path(manifest).expanduser().resolve())
     _require_runtime_safety_contract(check)
+    identity_continuity = _require_restored_receipt_identity(check)
     if check.stage == "recycled":
         verified = verify_restored_copy(check)
     elif check.stage == "restored-verified":
@@ -162,6 +273,11 @@ def verify_restore_evidence(
         else verified.folder / REPORT_NAME
     )
     report = export_recycle_evidence(verified, destination)
+    if identity_continuity:
+        # The receipt is already embedded in the manifest/report. Keep this check
+        # read-only: no second state transition is required merely to record that
+        # the comparison succeeded.
+        _require_restored_receipt_identity(verified)
     return verified, report
 
 
@@ -206,6 +322,7 @@ def validate_restore_evidence_report(
         raise RecycleVerificationError(
             "Recycle evidence report is reviewable only after restored-verified stage"
         )
+    _require_restored_receipt_identity(check)
 
     inspection = inspect_recycle_evidence(check)
     if not inspection.valid:
@@ -244,6 +361,12 @@ def _print_move_success(check: RecycleVerification) -> None:
     print(f"MOVE_CONFIRMED manifest={check.manifest}")
     print(f"ORIGINAL_PRESERVED path={check.original}")
     print(f"RESTORE_REQUIRED path={check.copy}")
+    receipt = _validated_receipt(_read_manifest_payload(check))
+    if receipt is not None:
+        print(
+            "FILESYSTEM_IDENTITY_RECEIPT="
+            + ("available" if receipt["source_inode"] > 0 else "unavailable")
+        )
     print(
         "Restore RECYCLE-ME.png from Windows Recycle Bin, then run: "
         f"SwirPhotoClean.exe --recycle-restore-verify \"{check.manifest}\""
@@ -284,7 +407,12 @@ def _print_status(manifest: str | Path) -> int:
         print(f"REPORT_PRESENT={'yes' if report.is_file() else 'no'} path={report}")
         if report.is_file():
             validate_restore_evidence_report(report, manifest=manifest_path)
+            continuity = _require_restored_receipt_identity(check)
             print("REPORT_VALID=yes")
+            print(
+                "FILESYSTEM_IDENTITY_CONTINUITY="
+                + ("yes" if continuity else "not-recorded")
+            )
             print(
                 "NEXT=Run the read-only report review before changing STATUS.md: "
                 f"SwirPhotoClean.exe --recycle-restore-review \"{report}\""
@@ -300,11 +428,16 @@ def _print_status(manifest: str | Path) -> int:
 
 def _print_report_review(report: str | Path) -> int:
     check, report_path = validate_restore_evidence_report(report)
+    continuity = _require_restored_receipt_identity(check)
     print("REPORT_VALID")
     print(f"EVIDENCE_STAGE={check.stage}")
     print(f"SESSION={check.session_id or 'legacy'}")
     print(f"SHA256={check.digest}")
     print(f"SAFETY_CONTRACT_SHA256={_runtime_contract_digest()}")
+    print(
+        "FILESYSTEM_IDENTITY_CONTINUITY="
+        + ("yes" if continuity else "not-recorded")
+    )
     print(f"MANIFEST={check.manifest}")
     print(f"EVIDENCE_REPORT={report_path}")
     print("READY_FOR_MANUAL_ACCEPTANCE_REVIEW")
@@ -367,11 +500,16 @@ def cli_main(argv: tuple[str, ...] | list[str]) -> int:
                     "verify requires exactly one recycle-verification.json path"
                 )
             verified, report = verify_restore_evidence(args[0])
+            continuity = _require_restored_receipt_identity(verified)
             print("RESTORE_VERIFIED")
             print(f"ORIGINAL_PRESERVED path={verified.original}")
             print(f"RESTORED_COPY path={verified.copy}")
             print(f"SHA256={verified.digest}")
             print(f"SAFETY_CONTRACT_SHA256={_runtime_contract_digest()}")
+            print(
+                "FILESYSTEM_IDENTITY_CONTINUITY="
+                + ("yes" if continuity else "not-recorded")
+            )
             print(f"EVIDENCE_REPORT path={report}")
             print(
                 "REVIEW_COMMAND=SwirPhotoClean.exe --recycle-restore-review "
