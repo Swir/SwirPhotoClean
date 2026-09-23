@@ -486,15 +486,59 @@ def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, p
         return result
 
 
+def _require_safe_photo_path(path: Path) -> None:
+    """Reject a reviewed path if any lexical component is now a reparse point."""
+
+    if any(linked(part) for part in (path, *path.parents)):
+        raise SafetyError(tr('Dowiązanie w ścieżce: {v0}', v0=path))
+
+
 def verify_photo(photo, cancel):
+    """Revalidate one reviewed photo through a scan-bound immutable read.
+
+    The safety decision must cover the same filesystem object that was scanned.
+    Checking path metadata and then hashing through a fresh pathname leaves a
+    replacement window between those operations. Bind the hash handle directly to
+    the scan-time size/mtime/device/inode identity, keep that handle stable through
+    EOF, then recheck the lexical ancestry and final path identity. This protects
+    both recycle targets and keeper copies before any disposal is attempted.
+    """
+
+    expected = (photo.size, photo.modified_ns, photo.device, photo.inode)
+    profile = get_performance_profile(None)
+    checkpoint(cancel)
     try:
-        # Validate every ancestor too, in case a folder was swapped for a junction.
-        if any(linked(part) for part in (photo.path, *photo.path.parents)):
-            raise SafetyError(tr('Dowiązanie w ścieżce: {v0}', v0=photo.path))
+        _require_safe_photo_path(photo.path)
         current = photo.path.stat()
-        if signature(current) != (photo.size, photo.modified_ns, photo.device, photo.inode):
+        if signature(current) != expected:
             raise SafetyError(tr('Plik zmienił się: {v0}', v0=photo.path))
-        if sha256(photo.path, cancel) != photo.digest:
+
+        with photo.path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or bool(getattr(opened, "st_file_attributes", 0) & 0x400)
+                or signature(opened) != expected
+            ):
+                raise SafetyError(tr('Plik zmienił się: {v0}', v0=photo.path))
+
+            digest = _sha256_stream(stream, cancel, profile)
+            after_read = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(after_read.st_mode)
+                or bool(getattr(after_read, "st_file_attributes", 0) & 0x400)
+                or signature(after_read) != expected
+            ):
+                raise SafetyError(tr('Plik zmienił się: {v0}', v0=photo.path))
+
+        _require_safe_photo_path(photo.path)
+        after = photo.path.stat()
+        if signature(after) != expected:
+            raise SafetyError(tr('Plik zmienił się: {v0}', v0=photo.path))
+        # A second ancestry check narrows a final path-swap window between stat and
+        # return; the production Shell layer performs its own independent binding.
+        _require_safe_photo_path(photo.path)
+        if digest != photo.digest:
             raise SafetyError(tr('Zawartość pliku zmieniła się: {v0}', v0=photo.path))
     except OSError as error:
         raise SafetyError(tr('Plik niedostępny: {v0}: {v1}', v0=photo.path, v1=error)) from error
