@@ -6,6 +6,8 @@ always a candidate unless there is explicit camera metadata supporting a photo.
 """
 from __future__ import annotations
 
+import os
+import stat
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -14,12 +16,9 @@ from typing import Callable, Iterable
 
 from PIL import Image
 
-from .core import Photo, ScanResult
+from .core import Photo, ScanResult, linked, signature
+from .exif_metadata import metadata_from_exif
 
-
-CAMERA_MAKE_TAG = 271
-CAMERA_MODEL_TAG = 272
-DATETIME_ORIGINAL_TAG = 36867
 
 # Exact pixel sizes seen on common desktop/mobile displays. We intentionally
 # require an exact match and missing camera metadata before surfacing a
@@ -128,15 +127,6 @@ _CONFIDENCE_ORDER = {"high": 0, "medium": 1, "low": 2}
 _SORT_MODES = frozenset({"path", "size_desc", "resolution_desc", "confidence"})
 
 
-def _clean_exif_text(value) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    text = " ".join(str(value).replace("\x00", " ").split()).strip()
-    return text[:200] if text else None
-
-
 def _screen_size(width: int, height: int) -> bool:
     pair = (width, height)
     return pair in _COMMON_SCREEN_SIZES or (height, width) in _COMMON_SCREEN_SIZES
@@ -194,20 +184,43 @@ def filter_and_sort_media_items(
     return tuple(sorted(visible, key=key))
 
 
-def inspect_media_type(photo: Photo) -> MediaClassification:
-    """Classify one image using conservative, explainable local evidence."""
+def _scan_signature(photo: Photo) -> tuple[int, int, int, int]:
+    return photo.size, photo.modified_ns, photo.device, photo.inode
 
-    with Image.open(photo.path) as image:
-        image_format = (image.format or photo.path.suffix.lstrip(".") or "").upper() or None
-        mode = image.mode or None
-        exif = image.getexif()
-        make = _clean_exif_text(exif.get(CAMERA_MAKE_TAG))
-        model = _clean_exif_text(exif.get(CAMERA_MODEL_TAG))
-        captured = _clean_exif_text(exif.get(DATETIME_ORIGINAL_TAG))
-        camera_metadata = bool(make or model)
-        capture_timestamp = bool(captured)
-        has_alpha = bool("A" in (mode or "") or "transparency" in image.info)
-        palette_like = mode in {"1", "P"}
+
+def inspect_media_type(photo: Photo) -> MediaClassification:
+    """Classify one stable scanned image using conservative local evidence.
+
+    Classification runs after the scanner, so the pathname may no longer identify
+    the object whose dimensions/hash were recorded. Bind Pillow to one already-open
+    handle matching the saved scanner signature and reject stale/reparse paths.
+    This keeps screenshot/graphic/camera labels from being derived from a substituted
+    file while preserving the feature's read-only, review-only behavior.
+    """
+
+    expected = _scan_signature(photo)
+    if any(linked(part) for part in (photo.path, *photo.path.parents)):
+        raise OSError(f"unsafe link/reparse path: {photo.path}")
+    before = photo.path.stat()
+    if not stat.S_ISREG(before.st_mode) or signature(before) != expected:
+        raise OSError(f"file changed since scan: {photo.path}")
+
+    with photo.path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or signature(opened) != expected:
+            raise OSError(f"file changed while opening for media inspection: {photo.path}")
+        with Image.open(stream) as image:
+            image_format = (image.format or photo.path.suffix.lstrip(".") or "").upper() or None
+            mode = image.mode or None
+            metadata = metadata_from_exif(image.getexif())
+            camera_metadata = bool(metadata.camera_make or metadata.camera_model)
+            capture_timestamp = metadata.captured_at is not None
+            has_alpha = bool("A" in (mode or "") or "transparency" in image.info)
+            palette_like = mode in {"1", "P"}
+
+    after = photo.path.stat()
+    if not stat.S_ISREG(after.st_mode) or signature(after) != expected:
+        raise OSError(f"file changed during media inspection: {photo.path}")
 
     reasons: list[str] = []
     if camera_metadata:
