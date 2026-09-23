@@ -99,6 +99,45 @@ def _identity_from_stat(info) -> tuple[int, int, int, int, int]:
     )
 
 
+def _scan_signature_from_stat(info) -> tuple[int, int, int, int]:
+    """Normalize the scanner identity stored on ``Photo`` records.
+
+    The order intentionally matches ``photoclean.core.signature`` and the fields
+    persisted on ``Photo``: size, mtime_ns, device, inode. Keeping this separate
+    from the stronger local recycle identity lets the final Shell layer prove that
+    it is still operating on the exact object that was scanned and reviewed.
+    """
+    return (
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(info.st_dev),
+        int(info.st_ino),
+    )
+
+
+def _normalize_scan_signature(expected_scan_signature) -> tuple[int, int, int, int] | None:
+    if expected_scan_signature is None:
+        return None
+    try:
+        normalized = tuple(int(value) for value in expected_scan_signature)
+    except (TypeError, ValueError) as error:
+        raise OSError(tr('Nieprawidłowa sygnatura pliku ze skanu.')) from error
+    if len(normalized) != 4:
+        raise OSError(tr('Nieprawidłowa sygnatura pliku ze skanu.'))
+    return normalized
+
+
+def _require_scan_signature(path, expected_scan_signature) -> Path:
+    """Fail closed unless the live path still matches the scanner/review identity."""
+    candidate = _require_regular_file_target(path)
+    expected = _normalize_scan_signature(expected_scan_signature)
+    if expected is None:
+        return candidate
+    if _scan_signature_from_stat(_safe_lstat(candidate)) != expected:
+        raise OSError(tr('Plik zmienił się: {v0}', v0=str(candidate)))
+    return candidate
+
+
 def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
     """Return metadata used to detect a last-moment target replacement/mutation."""
     return _identity_from_stat(_safe_lstat(path))
@@ -181,7 +220,26 @@ def _require_same_file_content(path, expected_identity, expected_digest) -> Path
     return candidate
 
 
-def recycle_file(path):
+def _scan_bound_snapshot(path, expected_scan_signature=None, expected_scan_digest=None):
+    """Bind the recycle baseline to the exact object captured by the scanner.
+
+    ``recycle_file`` used to start from a fresh identity snapshot after the core
+    revalidation. A path replacement in that narrow gap could therefore become the
+    new trusted baseline. When scan evidence is supplied, require the live object
+    to match it before and after the bound full-file hash and require the digest to
+    equal the scan-time SHA-256. The returned local identity remains the stronger
+    last-moment baseline used by the Shell dispatch guards.
+    """
+    candidate = _require_scan_signature(path, expected_scan_signature)
+    expected_identity = _file_identity(candidate)
+    digest = _stable_file_sha256(candidate, expected_identity)
+    _require_scan_signature(candidate, expected_scan_signature)
+    if expected_scan_digest is not None and digest.lower() != str(expected_scan_digest).lower():
+        raise OSError(tr('Zawartość pliku zmieniła się: {v0}', v0=str(candidate)))
+    return candidate, expected_identity, digest
+
+
+def recycle_file(path, *, expected_scan_signature=None, expected_scan_digest=None):
     if os.name != "nt":
         raise OSError(tr('Przenoszenie do kosza w tej wersji jest dostępne tylko na Windows.'))
     import ctypes
@@ -190,8 +248,7 @@ def recycle_file(path):
     from win32com.server.exception import COMException
     from send2trash.win.IFileOperationProgressSink import FileOperationProgressSink
 
-    absolute_path = _require_regular_file_target(path)
-    expected_identity = _file_identity(absolute_path)
+    absolute_path = _require_scan_signature(path, expected_scan_signature)
     absolute = str(absolute_path)
     volume = ctypes.create_unicode_buffer(32768)
     if not ctypes.windll.kernel32.GetVolumePathNameW(absolute, volume, len(volume)):
@@ -201,7 +258,14 @@ def recycle_file(path):
 
     # Only fixed local targets reach the full-content safety snapshot. This avoids
     # expensive reads on network/removable paths that the cleanup policy blocks.
-    expected_digest = _stable_file_sha256(absolute_path, expected_identity)
+    # When called from the scanner cleanup workflow this snapshot is additionally
+    # pinned to the scan-time identity and full SHA-256, so a replacement cannot
+    # silently become a fresh trusted baseline between core review and Shell use.
+    absolute_path, expected_identity, expected_digest = _scan_bound_snapshot(
+        absolute_path,
+        expected_scan_signature=expected_scan_signature,
+        expected_scan_digest=expected_scan_digest,
+    )
 
     class RecycleOnlySink(FileOperationProgressSink):
         def __init__(self):
@@ -232,8 +296,10 @@ def recycle_file(path):
                                     shellcon.FOF_NOCONFIRMATION | shellcon.FOF_ALLOWUNDO | 0x00100000 |
                                     0x20000000 | 0x00080000)
         item = shell.SHCreateItemFromParsingName(absolute, None, shell.IID_IShellItem)
+        _require_scan_signature(absolute_path, expected_scan_signature)
         _require_same_regular_file_target(absolute_path, expected_identity)
         operation.DeleteItem(item, wrapped)
+        _require_scan_signature(absolute_path, expected_scan_signature)
         _require_same_file_content(absolute_path, expected_identity, expected_digest)
         try:
             result = operation.PerformOperations()
