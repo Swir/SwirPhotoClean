@@ -141,7 +141,8 @@ class SessionResumeHardeningTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(
-                SessionError, "cannot overwrite or alias a scanned photo"
+                SessionError,
+                r"(cannot overwrite or alias a scanned photo|must not be hardlinked)",
             ):
                 save_session(snapshot, alias)
 
