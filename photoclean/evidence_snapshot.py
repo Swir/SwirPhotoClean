@@ -97,7 +97,8 @@ def _read_stable_report_bytes(report: Path) -> bytes:
             raise RecycleVerificationError(
                 "Recycle evidence report became hardlinked while opening"
             )
-        if _file_identity(opened) != before_identity:
+        opened_identity = _file_identity(opened)
+        if opened_identity != before_identity:
             raise RecycleVerificationError(
                 "Recycle evidence report changed while it was being opened"
             )
@@ -126,7 +127,7 @@ def _read_stable_report_bytes(report: Path) -> bytes:
                 )
 
         after = os.fstat(descriptor)
-        if _file_identity(after) != _file_identity(opened):
+        if _file_identity(after) != opened_identity:
             raise RecycleVerificationError(
                 "Recycle evidence report changed while snapshot bytes were being read"
             )
