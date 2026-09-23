@@ -88,9 +88,8 @@ def _require_regular_file_target(path) -> Path:
     return candidate
 
 
-def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
-    """Return metadata used to detect a last-moment target replacement/mutation."""
-    info = _safe_lstat(path)
+def _identity_from_stat(info) -> tuple[int, int, int, int, int]:
+    """Normalize metadata used to bind a verified path to an opened file handle."""
     return (
         int(info.st_dev),
         int(info.st_ino),
@@ -98,6 +97,32 @@ def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
         int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
         int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
     )
+
+
+def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
+    """Return metadata used to detect a last-moment target replacement/mutation."""
+    return _identity_from_stat(_safe_lstat(path))
+
+
+def _path_and_handle_identity_match(
+    expected_identity: tuple[int, int, int, int, int],
+    opened_info,
+) -> bool:
+    """Bind an open handle to the path identity without Windows CRT false alarms.
+
+    Windows may expose small path-vs-handle metadata representation differences.
+    Require a real positive file-id match there and bind size/mtime as well; on
+    other platforms the full normalized identity must match exactly.
+    """
+    opened_identity = _identity_from_stat(opened_info)
+    if os.name != "nt":
+        return opened_identity == expected_identity
+
+    expected_inode = int(expected_identity[1])
+    opened_inode = int(opened_identity[1])
+    if expected_inode <= 0 or opened_inode <= 0 or expected_inode != opened_inode:
+        return False
+    return expected_identity[2:4] == opened_identity[2:4]
 
 
 def _require_same_regular_file_target(path, expected_identity) -> Path:
@@ -109,20 +134,33 @@ def _require_same_regular_file_target(path, expected_identity) -> Path:
 
 
 def _stable_file_sha256(path, expected_identity) -> str:
-    """Hash a recycle target only while it remains the same verified regular file.
+    """Hash exactly the verified recycle target through one bound open handle.
 
-    Metadata identity catches normal replacements cheaply, but a second content
-    signal closes the gap where a same-size mutation might otherwise preserve the
-    fields used by the final Shell handoff checks. The identity is validated both
-    before and after the read so a digest collected across a replacement is never
-    accepted as release-safety evidence.
+    A path can be swapped after the pre-open metadata check but before ``open``.
+    Bind the resulting handle back to the expected filesystem identity before any
+    bytes are trusted, verify the handle remains stable during the read, then
+    revalidate the path after closing. A digest from a different file object is
+    therefore rejected instead of becoming recycle-safety evidence.
     """
     candidate = _require_same_regular_file_target(path, expected_identity)
     digest = hashlib.sha256()
     try:
         with candidate.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode):
+                raise OSError(tr('Cel Kosza nie jest zwykłym plikiem: {v0}', v0=str(candidate)))
+            if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+                raise OSError(tr('Dowiązanie w ścieżce: {v0}', v0=str(candidate)))
+            if not _path_and_handle_identity_match(expected_identity, opened):
+                raise OSError(tr('Plik zmienił się: {v0}', v0=str(candidate)))
+
+            opened_identity = _identity_from_stat(opened)
             while chunk := stream.read(_HASH_CHUNK_BYTES):
                 digest.update(chunk)
+
+            after_read = os.fstat(stream.fileno())
+            if not _path_and_handle_identity_match(opened_identity, after_read):
+                raise OSError(tr('Plik zmienił się: {v0}', v0=str(candidate)))
     except OSError as error:
         raise OSError(
             tr(
