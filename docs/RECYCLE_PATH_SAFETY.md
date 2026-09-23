@@ -12,6 +12,14 @@ The ancestry check is also **fail closed on metadata errors**. If the target dis
 
 Immediately before the Windows Shell request, the final recycle backend also requires the target itself to still be a **regular file**. A path that was a scanned photo but has since been replaced by a directory or another non-file filesystem object is rejected. This is deliberately enforced at the final production recycle boundary rather than relying only on the earlier scan/review state.
 
+## Scan-to-Shell continuity
+
+The normal cleanup path now carries the target's **scan-time identity** (`size`, `mtime_ns`, device and inode/file id) and full scan-time **SHA-256** into the final `recycle_file` layer. The final backend requires the live path to match that scanner/review identity before creating its own local recycle snapshot, hashes the object through the already identity-bound read path, and requires the digest to equal the scan-time digest.
+
+This closes the narrow handoff gap where a path could previously be replaced after `core.recycle_selected()` revalidated the reviewed `Photo` but before `recycle_file()` created a fresh baseline. A replacement is no longer allowed to become the new trusted baseline simply because it is stable from that later point onward. The scan signature is checked again around Shell queuing, while the existing full-content guard still runs immediately before `PerformOperations()`.
+
+Injected recycle callbacks used by unit tests keep the historical single-path calling convention. The production Windows backend is the path that receives and enforces scan-bound identity and digest evidence.
+
 ## Last-moment identity and content stability
 
 The recycle backend takes a metadata identity snapshot of the verified file and rechecks it after creating the Windows Shell item and again during the final handoff. The comparison includes volume/device identity, file identity, size, modification time and change time. If the file is replaced or modified during that window, the operation stops instead of letting a stale review decision reach the Shell request.
@@ -30,4 +38,4 @@ The existing fixed-local-drive gate remains mandatory after these checks. Networ
 
 The physical 1.0 Recycle/Restore test uses the same production `photoclean.recycle.recycle_file` backend, so the generated `RECYCLE-ME.png` cannot qualify evidence through an ambiguous reparse/junction path, after being replaced by a non-file object, after a last-moment identity change, after an open-handle substitution, or after a content mutation detected before Shell execution. If the check refuses the path, choose an ordinary folder on a local fixed drive and create a fresh evidence session there.
 
-Unit tests cover regular files, directory replacement rejection, missing targets, unreadable path metadata, target-level reparse rejection, ancestor-level rejection, full ancestry traversal, unchanged identity acceptance, content mutation rejection, path replacement rejection, stable SHA-256 collection, open-handle substitution rejection and independent final digest mismatch rejection. The real Windows move/Restore acceptance item in `STATUS.md` remains unchanged and must still be completed physically before a qualified 1.0 release.
+Unit tests cover regular files, directory replacement rejection, missing targets, unreadable path metadata, target-level reparse rejection, ancestor-level rejection, full ancestry traversal, unchanged identity acceptance, content mutation rejection, path replacement rejection, stable SHA-256 collection, open-handle substitution rejection, independent final digest mismatch rejection, scan-time identity forwarding, unchanged scan-bound snapshots and same-metadata content replacement rejection. The real Windows move/Restore acceptance item in `STATUS.md` remains unchanged and must still be completed physically before a qualified 1.0 release.

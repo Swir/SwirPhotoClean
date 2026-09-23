@@ -501,7 +501,14 @@ def verify_photo(photo, cancel):
 
 
 def recycle_selected(result, selected, cancel=None, recycle=None, progress=None):
-    """Validate the whole plan before disposal; recheck each target/keeper at use."""
+    """Validate the whole plan before disposal; recheck each target/keeper at use.
+
+    The production Windows path also passes the target's scan-time filesystem
+    identity and full SHA-256 into ``recycle_file``. That prevents a replacement
+    between this core revalidation and the Shell layer from becoming a fresh,
+    trusted recycle baseline. Injected callbacks keep the historical one-argument
+    contract for tests and non-production harnesses.
+    """
     if result.cancelled:
         raise SafetyError(tr('Skan został anulowany. Uruchom pełny skan.'))
     cancel = cancel or threading.Event()
@@ -530,17 +537,32 @@ def recycle_selected(result, selected, cancel=None, recycle=None, progress=None)
     for photo in check.values():
         progress(tr('Sprawdzanie przed przeniesieniem • {v0}', v0=photo.path.name))
         verify_photo(photo, cancel)
-    if recycle is None:
+
+    default_recycle = recycle is None
+    if default_recycle:
         from .recycle import recycle_file
-        recycle = recycle_file
+
     completed, failed = [], []
     for path in sorted(selected):
         try:
             checkpoint(cancel)
             for keeper in keepers[path]:
                 verify_photo(keeper, cancel)
-            verify_photo(known[path], cancel)
-            recycle(str(path))  # never fall back to unlink/remove
+            target = known[path]
+            verify_photo(target, cancel)
+            if default_recycle:
+                recycle_file(
+                    str(path),
+                    expected_scan_signature=(
+                        target.size,
+                        target.modified_ns,
+                        target.device,
+                        target.inode,
+                    ),
+                    expected_scan_digest=target.digest,
+                )
+            else:
+                recycle(str(path))  # injected seam; production never falls back to unlink/remove
             completed.append(path)
             progress(tr('Przeniesiono do kosza • {v0}', v0=path.name))
         except Cancelled:
