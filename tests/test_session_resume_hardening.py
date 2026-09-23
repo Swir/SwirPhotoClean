@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +52,128 @@ class SessionResumeHardeningTests(unittest.TestCase):
                         SessionError, "session file exceeds the supported size"
                     ):
                         load_session(source)
+
+    def test_resume_accepts_unchanged_regular_file_via_open_handle(self):
+        """The hardened preflight keeps a normal unchanged scan member reviewable."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.jpg"
+            source.write_bytes(b"stable-resume-member")
+            photo = _photo_from_file(source)
+            snapshot = SessionSnapshot(
+                roots=(root,),
+                threshold=6,
+                include_similar=False,
+                result=ScanResult(photos=[photo]),
+            )
+
+            audit = audit_session_snapshot(snapshot)
+
+            self.assertEqual(audit.checked_count, 1)
+            self.assertEqual(audit.valid_count, 1)
+            self.assertEqual(audit.stale_count, 0)
+            self.assertEqual(audit.snapshot.result.photos, [photo])
+
+    def test_resume_rejects_linked_parent_component(self):
+        """A junction/reparse ancestor must not be trusted merely because the leaf is regular."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.jpg"
+            source.write_bytes(b"session-through-unsafe-parent")
+            photo = _photo_from_file(source)
+            snapshot = SessionSnapshot(
+                roots=(root,),
+                threshold=6,
+                include_similar=False,
+                result=ScanResult(photos=[photo]),
+            )
+
+            with patch(
+                "photoclean.session.linked",
+                side_effect=lambda candidate: candidate == root,
+            ):
+                audit = audit_session_snapshot(snapshot)
+
+            self.assertEqual(audit.valid_count, 0)
+            self.assertEqual(audit.unsafe_link_count, 1)
+            self.assertEqual(audit.changed_count, 0)
+            self.assertEqual(audit.snapshot.result.photos, [])
+            self.assertTrue(
+                any("link/reparse=1" in warning for warning in audit.snapshot.result.warnings)
+            )
+
+    def test_resume_rejects_open_handle_identity_mismatch(self):
+        """A path swap between stat and open must fail even when path metadata looked valid."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.jpg"
+            source.write_bytes(b"stable-path-decoy-handle")
+            photo = _photo_from_file(source)
+            info = source.stat()
+            opened_decoy = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o600,
+                st_size=info.st_size,
+                st_mtime_ns=info.st_mtime_ns,
+                st_dev=info.st_dev,
+                st_ino=info.st_ino + 1,
+            )
+            snapshot = SessionSnapshot(
+                roots=(root,),
+                threshold=6,
+                include_similar=False,
+                result=ScanResult(photos=[photo]),
+            )
+
+            with patch("photoclean.session.os.fstat", return_value=opened_decoy):
+                audit = audit_session_snapshot(snapshot)
+
+            self.assertEqual(audit.valid_count, 0)
+            self.assertEqual(audit.changed_count, 1)
+            self.assertEqual(audit.unavailable_count, 0)
+            self.assertTrue(
+                any(
+                    "opened file identity changed" in warning
+                    for warning in audit.snapshot.result.warnings
+                )
+            )
+
+    def test_resume_rejects_path_swap_while_handle_is_open(self):
+        """A replacement after open must not inherit the saved session metadata."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.jpg"
+            source.write_bytes(b"path-swap-after-open")
+            photo = _photo_from_file(source)
+            current = source.stat()
+            replacement = SimpleNamespace(
+                st_mode=current.st_mode,
+                st_size=current.st_size,
+                st_mtime_ns=current.st_mtime_ns,
+                st_dev=current.st_dev,
+                st_ino=current.st_ino + 1,
+            )
+            snapshot = SessionSnapshot(
+                roots=(root,),
+                threshold=6,
+                include_similar=False,
+                result=ScanResult(photos=[photo]),
+            )
+
+            with patch.object(Path, "stat", side_effect=[current, replacement]):
+                audit = audit_session_snapshot(snapshot)
+
+            self.assertEqual(audit.valid_count, 0)
+            self.assertEqual(audit.changed_count, 1)
+            self.assertTrue(
+                any(
+                    "path changed while the resumed file was audited" in warning
+                    for warning in audit.snapshot.result.warnings
+                )
+            )
 
     def test_resume_drops_second_hardlink_identity_and_collapsed_group(self):
         """Resume must keep the scanner invariant: one physical file, one member."""
