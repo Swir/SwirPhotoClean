@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +17,8 @@ _SEMVER = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
 )
+_REPARSE_POINT_ATTRIBUTE = 0x400
+_MAX_RUNTIME_EVIDENCE_BYTES = 64 * 1024
 
 
 class ReleaseGateError(ValueError):
@@ -125,6 +129,142 @@ def _acceptance_metrics() -> tuple[int, int, float]:
     return metrics()
 
 
+def _runtime_evidence_identity(info) -> tuple[int, int, int, int, int, int]:
+    """Normalize metadata used to bind a release-evidence path to one open handle."""
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _runtime_path_and_handle_identity_match(
+    path_identity: tuple[int, int, int, int, int, int],
+    handle_identity: tuple[int, int, int, int, int, int],
+) -> bool:
+    """Compare lstat/fstat identity without Windows CRT representation noise."""
+    if os.name != "nt":
+        return path_identity == handle_identity
+
+    path_inode = path_identity[1]
+    handle_inode = handle_identity[1]
+    if path_inode <= 0 or handle_inode <= 0 or path_inode != handle_inode:
+        return False
+    return path_identity[2:5] == handle_identity[2:5]
+
+
+def _require_safe_runtime_evidence_entry(path: Path):
+    """Reject aliases and ambiguous filesystem objects before release authorization."""
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise ReleaseGateError(
+            f"cannot safely inspect runtime evidence input {path}: {error}"
+        ) from error
+
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise ReleaseGateError(
+            "runtime evidence input must not be a symlink, junction or reparse point"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise ReleaseGateError("runtime evidence input must be a regular file")
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise ReleaseGateError("runtime evidence input must not be hardlinked")
+    if int(info.st_size) > _MAX_RUNTIME_EVIDENCE_BYTES:
+        raise ReleaseGateError(
+            f"runtime evidence input is too large: maximum is {_MAX_RUNTIME_EVIDENCE_BYTES} bytes"
+        )
+    return info
+
+
+def _read_stable_runtime_evidence_payload(path: Path) -> object:
+    """Read one bounded immutable snapshot of RELEASE_EVIDENCE.json.
+
+    The publication gate must validate the exact bytes captured from the verified
+    regular-file handle. A path swap, hardlink, reparse point, oversized input or
+    metadata mutation therefore fails closed instead of authorizing a release from
+    a different filesystem object than the one inspected before opening.
+    """
+    evidence = Path(os.path.abspath(os.fspath(path.expanduser())))
+    before = _require_safe_runtime_evidence_entry(evidence)
+    before_identity = _runtime_evidence_identity(before)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(evidence, flags)
+    except OSError as error:
+        raise ReleaseGateError(
+            f"cannot open runtime evidence safely: {error}"
+        ) from error
+
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ReleaseGateError(
+                "runtime evidence input changed to a non-regular file while opening"
+            )
+        if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+            raise ReleaseGateError(
+                "runtime evidence input changed to a reparse point while opening"
+            )
+        if int(getattr(opened, "st_nlink", 1)) != 1:
+            raise ReleaseGateError(
+                "runtime evidence input became hardlinked while opening"
+            )
+        opened_identity = _runtime_evidence_identity(opened)
+        if not _runtime_path_and_handle_identity_match(before_identity, opened_identity):
+            raise ReleaseGateError(
+                "runtime evidence input changed while it was being opened"
+            )
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            remaining = _MAX_RUNTIME_EVIDENCE_BYTES + 1 - total
+            if remaining <= 0:
+                raise ReleaseGateError(
+                    f"runtime evidence input is too large: maximum is {_MAX_RUNTIME_EVIDENCE_BYTES} bytes"
+                )
+            try:
+                chunk = os.read(descriptor, min(64 * 1024, remaining))
+            except OSError as error:
+                raise ReleaseGateError(
+                    f"cannot read runtime evidence safely: {error}"
+                ) from error
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > _MAX_RUNTIME_EVIDENCE_BYTES:
+                raise ReleaseGateError(
+                    f"runtime evidence input is too large: maximum is {_MAX_RUNTIME_EVIDENCE_BYTES} bytes"
+                )
+
+        after = os.fstat(descriptor)
+        if _runtime_evidence_identity(after) != opened_identity:
+            raise ReleaseGateError("runtime evidence input changed while being read")
+    finally:
+        os.close(descriptor)
+
+    final = _require_safe_runtime_evidence_entry(evidence)
+    if _runtime_evidence_identity(final) != before_identity:
+        raise ReleaseGateError("runtime evidence input path changed while being read")
+
+    raw = b"".join(chunks)
+    if len(raw) != int(before.st_size):
+        raise ReleaseGateError("runtime evidence input size changed while being read")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseGateError(
+            f"runtime evidence input is not valid UTF-8 JSON: {error}"
+        ) from error
+
+
 def _read_runtime_evidence(*, required: bool) -> bool:
     try:
         from tools.release_evidence import (
@@ -147,9 +287,9 @@ def _read_runtime_evidence(*, required: bool) -> bool:
         return False
 
     try:
-        payload = json.loads(RELEASE_EVIDENCE_PATH.read_text(encoding="utf-8"))
+        payload = _read_stable_runtime_evidence_payload(RELEASE_EVIDENCE_PATH)
         validate_release_evidence(payload)
-    except (OSError, json.JSONDecodeError, ReleaseEvidenceError) as error:
+    except (OSError, ReleaseEvidenceError, ReleaseGateError) as error:
         raise ReleaseGateError(
             f"qualified release requires valid {RELEASE_EVIDENCE_PATH.name}: {error}"
         ) from error
