@@ -26,6 +26,8 @@ EVIDENCE_KIND = "windows-recycle-restore"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _REPARSE_POINT_ATTRIBUTE = 0x400
+_MAX_RELEASE_EVIDENCE_BYTES = 64 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 _REQUIRED_TRUE_FLAGS = (
     "physical_recycle_move_confirmed",
     "manual_restore_performed",
@@ -285,6 +287,137 @@ def _paths_alias(first: Path, second: Path) -> bool:
         return False
 
 
+def _release_evidence_input_identity(info) -> tuple[int, int, int, int, int, int]:
+    """Normalize metadata used to bind a verified input path to one open handle."""
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _release_evidence_path_and_handle_identity_match(
+    path_identity: tuple[int, int, int, int, int, int],
+    handle_identity: tuple[int, int, int, int, int, int],
+) -> bool:
+    """Compare path/handle identity without known Windows CRT metadata noise."""
+    if os.name != "nt":
+        return path_identity == handle_identity
+
+    path_inode = path_identity[1]
+    handle_inode = handle_identity[1]
+    if path_inode <= 0 or handle_inode <= 0 or path_inode != handle_inode:
+        return False
+    return path_identity[2:5] == handle_identity[2:5]
+
+
+def _require_safe_release_evidence_input(path: Path):
+    """Reject ambiguous filesystem objects before standalone evidence verification."""
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise ReleaseEvidenceError(
+            f"cannot safely inspect release evidence input {path}: {error}"
+        ) from error
+
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise ReleaseEvidenceError(
+            "release evidence input must not be a symlink, junction or reparse point"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise ReleaseEvidenceError("release evidence input must be a regular file")
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise ReleaseEvidenceError("release evidence input must not be hardlinked")
+    if int(info.st_size) > _MAX_RELEASE_EVIDENCE_BYTES:
+        raise ReleaseEvidenceError(
+            f"release evidence input is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+        )
+    return info
+
+
+def _read_stable_release_evidence_payload(path: str | Path) -> object:
+    """Read one bounded immutable snapshot of sanitized release evidence."""
+    evidence = _absolute_without_resolving(path)
+    before = _require_safe_release_evidence_input(evidence)
+    before_identity = _release_evidence_input_identity(before)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(evidence, flags)
+    except OSError as error:
+        raise ReleaseEvidenceError(f"cannot open release evidence safely: {error}") from error
+
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ReleaseEvidenceError(
+                "release evidence input changed to a non-regular file while opening"
+            )
+        if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+            raise ReleaseEvidenceError(
+                "release evidence input changed to a reparse point while opening"
+            )
+        if int(getattr(opened, "st_nlink", 1)) != 1:
+            raise ReleaseEvidenceError(
+                "release evidence input became hardlinked while opening"
+            )
+        opened_identity = _release_evidence_input_identity(opened)
+        if not _release_evidence_path_and_handle_identity_match(
+            before_identity,
+            opened_identity,
+        ):
+            raise ReleaseEvidenceError(
+                "release evidence input changed while it was being opened"
+            )
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            remaining = _MAX_RELEASE_EVIDENCE_BYTES + 1 - total
+            if remaining <= 0:
+                raise ReleaseEvidenceError(
+                    f"release evidence input is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+                )
+            try:
+                chunk = os.read(descriptor, min(_READ_CHUNK_BYTES, remaining))
+            except OSError as error:
+                raise ReleaseEvidenceError(
+                    f"cannot read release evidence safely: {error}"
+                ) from error
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > _MAX_RELEASE_EVIDENCE_BYTES:
+                raise ReleaseEvidenceError(
+                    f"release evidence input is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+                )
+
+        after = os.fstat(descriptor)
+        if _release_evidence_input_identity(after) != opened_identity:
+            raise ReleaseEvidenceError("release evidence input changed while being read")
+    finally:
+        os.close(descriptor)
+
+    final = _require_safe_release_evidence_input(evidence)
+    if _release_evidence_input_identity(final) != before_identity:
+        raise ReleaseEvidenceError("release evidence input path changed while being read")
+
+    raw = b"".join(chunks)
+    if len(raw) != int(before.st_size):
+        raise ReleaseEvidenceError("release evidence input size changed while being read")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseEvidenceError(
+            f"release evidence input is not valid UTF-8 JSON: {error}"
+        ) from error
+
+
 def _release_evidence_output_identity(path: Path) -> tuple[int, int, int, int, int] | None:
     """Return output identity or fail closed for unsafe existing output entries."""
     try:
@@ -395,11 +528,7 @@ def write_release_evidence(
 
 
 def read_release_evidence(path: str | Path = RELEASE_EVIDENCE_PATH) -> dict:
-    evidence = Path(path)
-    try:
-        payload = json.loads(evidence.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ReleaseEvidenceError(f"cannot read release evidence: {error}") from error
+    payload = _read_stable_release_evidence_payload(path)
     return validate_release_evidence(payload)
 
 
