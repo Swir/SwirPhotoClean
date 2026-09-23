@@ -1,12 +1,13 @@
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from photoclean.diagnostics import _atomic_write_json
+from photoclean.diagnostics import RecycleVerificationError, _atomic_write_json
 from photoclean.evidence_snapshot import load_validated_restore_evidence_snapshot
 from photoclean.recycle_evidence import (
     prepare_restore_evidence,
@@ -70,6 +71,62 @@ class EvidenceSnapshotTests(unittest.TestCase):
             self.assertEqual(raw, original_raw)
             self.assertTrue(payload["inspection"]["copy_matches"])
             self.assertNotEqual(report.read_bytes(), original_raw)
+
+    def test_snapshot_rejects_hardlinked_report_input(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            linked = report.with_name("recycle-evidence-hardlink.json")
+            try:
+                os.link(report, linked)
+            except OSError as error:
+                self.skipTest(f"hardlinks unavailable in test environment: {error}")
+
+            with self.assertRaisesRegex(RecycleVerificationError, "hardlinked"):
+                load_validated_restore_evidence_snapshot(linked)
+
+    def test_snapshot_rejects_symlink_report_input(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            linked = report.with_name("recycle-evidence-symlink.json")
+            try:
+                linked.symlink_to(report)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable in test environment: {error}")
+
+            with self.assertRaisesRegex(
+                RecycleVerificationError,
+                "symlink, junction or reparse point",
+            ):
+                load_validated_restore_evidence_snapshot(linked)
+
+    def test_snapshot_rejects_report_larger_than_bound(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            report_size = report.stat().st_size
+            self.assertGreater(report_size, 64)
+
+            with patch(
+                "photoclean.evidence_snapshot.MAX_EVIDENCE_REPORT_BYTES",
+                report_size - 1,
+            ):
+                with self.assertRaisesRegex(RecycleVerificationError, "too large"):
+                    load_validated_restore_evidence_snapshot(report)
+
+    def test_snapshot_rejects_metadata_change_during_single_handle_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            stable = (1, 2, 1, report.stat().st_size, 3, 4)
+            changed = (1, 2, 1, report.stat().st_size, 5, 6)
+
+            with patch(
+                "photoclean.evidence_snapshot._file_identity",
+                side_effect=[stable, stable, changed],
+            ):
+                with self.assertRaisesRegex(
+                    RecycleVerificationError,
+                    "changed while snapshot bytes were being read",
+                ):
+                    load_validated_restore_evidence_snapshot(report)
 
 
 if __name__ == "__main__":
