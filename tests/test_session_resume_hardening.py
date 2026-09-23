@@ -12,6 +12,7 @@ from photoclean.session import (
     SessionSnapshot,
     audit_session_snapshot,
     load_session,
+    save_session,
     snapshot_to_dict,
 )
 
@@ -94,6 +95,77 @@ class SessionResumeHardeningTests(unittest.TestCase):
                     for warning in audit.snapshot.result.warnings
                 )
             )
+
+    def test_save_refuses_to_overwrite_scanned_photo(self):
+        """Choosing a scanned source path as the session output must preserve it."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.jpg"
+            original = b"original-photo-bytes"
+            source.write_bytes(original)
+            scanned = _photo_from_file(source)
+            snapshot = SessionSnapshot(
+                roots=(root,),
+                threshold=6,
+                include_similar=False,
+                result=ScanResult(photos=[scanned]),
+            )
+
+            with self.assertRaisesRegex(
+                SessionError, "cannot overwrite or alias a scanned photo"
+            ):
+                save_session(snapshot, source)
+
+            self.assertEqual(source.read_bytes(), original)
+
+    def test_save_refuses_hardlink_alias_of_scanned_photo(self):
+        """A different path to the same source bytes must not bypass save protection."""
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.jpg"
+            alias = root / "review.swirpc"
+            original = b"hardlink-protected-photo"
+            source.write_bytes(original)
+            try:
+                os.link(source, alias)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"hardlinks unavailable: {error}")
+            scanned = _photo_from_file(source)
+            snapshot = SessionSnapshot(
+                roots=(root,),
+                threshold=6,
+                include_similar=False,
+                result=ScanResult(photos=[scanned]),
+            )
+
+            with self.assertRaisesRegex(
+                SessionError, "cannot overwrite or alias a scanned photo"
+            ):
+                save_session(snapshot, alias)
+
+            self.assertEqual(source.read_bytes(), original)
+            self.assertEqual(alias.read_bytes(), original)
+
+    def test_save_detects_target_swap_while_bytes_are_staged(self):
+        """A destination that changes after preflight must fail before replacement."""
+
+        snapshot = SessionSnapshot((), 6, False, ScanResult())
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "review.swirpc"
+            changed_identity = (1, 2, 1, 0, 0, 0)
+            with patch(
+                "photoclean.session._safe_session_target_identity",
+                side_effect=[None, changed_identity],
+            ):
+                with self.assertRaisesRegex(
+                    SessionError, "changed while validated bytes were staged"
+                ):
+                    save_session(snapshot, target)
+
+            self.assertFalse(target.exists())
+            self.assertEqual(list(Path(folder).iterdir()), [])
 
 
 if __name__ == "__main__":
