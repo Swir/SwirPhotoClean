@@ -10,6 +10,7 @@ SWIR PhotoClean 1.0.0 to lokalny, review-first cleaner zdjęć dla Windows 10/11
 - Difference View ogranicza duże źródła do wspólnego rozmiaru analizy przed wczytaniem drugiego obrazu, co wyraźnie zmniejsza szczytowe zużycie RAM podczas pełnoekranowego porównania dużych zdjęć bez zmiany semantyki wyniku.
 - Smart Keep, Folder Health, bezpieczne Session Save / Resume i pełnoekranowe porównanie zdjęć z zoomem oraz panoramowaniem.
 - Burst Cleaner i dodatkowe insighty jakościowe wspierające wybór najlepszej kopii bez automatycznego zaznaczania plików do usunięcia.
+- Photo Quality Score ogranicza duże źródła przed kosztowną konwersją/orientacją, a cache jakości jest teraz osłonięty kontrolą tożsamości pliku ze skanu, więc usunięty lub podmieniony plik nie zachowuje starej rekomendacji Smart Keep/Burst.
 - Profile wydajności, anulowanie skanowania, diagnostyka problemów, obsługa uszkodzonych plików, długich ścieżek i błędów dostępu.
 - Polski / English, HiDPI/resize, własna ikona i spójny branding `SwirPhotoClean — by Swir`.
 - Bezpieczny cleanup: rewalidacja plików, ochrona co najmniej jednej kopii w grupie oraz wyłącznie Windows Recycle Bin — bez fallbacku do trwałego usuwania.
@@ -31,6 +32,7 @@ SWIR PhotoClean 1.0.0 is a local, review-first photo cleaner for Windows 10/11. 
 - Difference View bounds a large source to the shared analysis size before loading the second image, substantially reducing peak RAM during fullscreen comparison of large photos without changing result semantics.
 - Smart Keep, Folder Health, safe Session Save / Resume, and fullscreen photo comparison with zoom and pan.
 - Burst Cleaner and quality insights that help choose the best copy without automatically marking files for removal.
+- Photo Quality Score now bounds large sources before expensive orientation/grayscale conversion, and cached quality evidence is guarded by scan-time file identity so a removed or replaced file cannot keep serving a stale Smart Keep/Burst recommendation.
 - Performance profiles, scan cancellation, diagnostics, corrupt-file resilience, long-path handling, and access-error reporting.
 - Polish / English UI, HiDPI/resize support, custom icon, and consistent `SwirPhotoClean — by Swir` branding.
 - Safe cleanup with file revalidation, at-least-one-copy group protection, and Windows Recycle Bin only — no permanent-delete fallback.

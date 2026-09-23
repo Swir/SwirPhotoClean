@@ -23,7 +23,13 @@ For similar photos, the enhanced recommendation combines:
 
 Resolution remains important, but a clearly soft or strongly clipped frame can lose to a slightly smaller, cleaner frame. Exact duplicate groups bypass subjective scoring because byte-identical files are equivalent.
 
-For very large groups, detailed quality analysis is bounded to the strongest structural candidates so the review path stays responsive. Missing or unreadable quality evidence is treated as neutral rather than as poor quality.
+For very large groups, detailed quality analysis is bounded to the strongest structural candidates so the review path stays responsive. Large individual photos are also reduced to the requested analysis bound before EXIF orientation and grayscale scoring allocate additional pixel buffers; JPEG decoders are asked to downsample early when supported.
+
+## Scan-identity guard
+
+A cached quality result is only a review aid for the exact scan record that produced it. Before and after each quality access, SWIR PhotoClean rechecks the file's scan-time size, modification timestamp and available filesystem identity and rejects symlink/reparse replacements. If a reviewed file disappears or changes after the scan, its quality evidence becomes unavailable instead of silently serving a stale cached recommendation.
+
+This guard is deliberately cheaper than the destructive-path validation. It does **not** replace the full SHA-256 revalidation performed before any Recycle Bin operation.
 
 ## Important limitations
 
