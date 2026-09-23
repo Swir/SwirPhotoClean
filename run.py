@@ -47,7 +47,10 @@ if __name__ == "__main__":
         "--recycle-restore-review",
         "--recycle-restore-verify",
     }:
-        from photoclean.recycle_evidence import cli_main
+        # The public/source entry point routes status/review through the stable
+        # evidence-snapshot layer. Mutating prepare/move/verify commands still
+        # delegate to the authoritative recycle workflow unchanged.
+        from photoclean.recycle_review_cli import cli_main
 
         raise SystemExit(cli_main(runtime.argv))
 
