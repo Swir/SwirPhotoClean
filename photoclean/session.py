@@ -331,16 +331,9 @@ def _absolute_without_resolving(path) -> Path:
     return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
 
 
-def _paths_alias(first: Path, second: Path) -> bool:
-    """Detect lexical aliases plus existing hardlink/symlink aliases."""
-    first_text = os.path.normcase(os.path.abspath(os.fspath(first)))
-    second_text = os.path.normcase(os.path.abspath(os.fspath(second)))
-    if first_text == second_text:
-        return True
-    try:
-        return os.path.samefile(first, second)
-    except OSError:
-        return False
+def _normalized_absolute(path: Path) -> str:
+    """Normalize a path lexically without following its final filesystem entry."""
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
 
 
 def _safe_session_target_identity(path: Path) -> SessionTargetIdentity | None:
@@ -373,10 +366,30 @@ def _safe_session_target_identity(path: Path) -> SessionTargetIdentity | None:
     )
 
 
-def _ensure_session_target_not_photo(snapshot: SessionSnapshot, target: Path) -> None:
-    """Never let session persistence replace a photo represented by the snapshot."""
+def _ensure_session_target_not_photo(
+    snapshot: SessionSnapshot,
+    target: Path,
+    target_identity: SessionTargetIdentity | None,
+) -> None:
+    """Never let session persistence replace a photo represented by the snapshot.
+
+    This check intentionally uses the already-read target identity plus stored scan
+    identities, rather than calling ``samefile`` for every photo. Large sessions can
+    therefore validate a new destination without thousands of filesystem probes.
+    """
+    target_path = _normalized_absolute(target)
+    target_file_id = None
+    if target_identity is not None and target_identity[1]:
+        target_file_id = (target_identity[0], target_identity[1])
+
     for photo in snapshot.result.photos:
-        if _paths_alias(target, photo.path):
+        if _normalized_absolute(photo.path) == target_path:
+            raise SessionError("session destination cannot overwrite or alias a scanned photo")
+        if (
+            target_file_id is not None
+            and photo.inode
+            and (photo.device, photo.inode) == target_file_id
+        ):
             raise SessionError("session destination cannot overwrite or alias a scanned photo")
 
 
@@ -390,8 +403,8 @@ def save_session(snapshot: SessionSnapshot, destination):
         raise SessionError("session snapshot exceeds the supported size")
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    _ensure_session_target_not_photo(snapshot, destination)
     expected_identity = _safe_session_target_identity(destination)
+    _ensure_session_target_not_photo(snapshot, destination, expected_identity)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile("wb", dir=destination.parent, delete=False) as stream:
@@ -400,9 +413,8 @@ def save_session(snapshot: SessionSnapshot, destination):
             stream.flush()
             os.fsync(stream.fileno())
 
-        # Re-check both the protected source aliases and destination identity after
-        # staging. A path swapped while bytes are being prepared must fail closed.
-        _ensure_session_target_not_photo(snapshot, destination)
+        # A path swapped while bytes are being prepared must fail closed. If the
+        # target changes into a source photo, its filesystem identity changes too.
         if _safe_session_target_identity(destination) != expected_identity:
             raise SessionError("session destination changed while validated bytes were staged")
         os.replace(temporary, destination)
