@@ -213,16 +213,25 @@ def snapshot_from_dict(raw):
     return SessionSnapshot(roots=roots, threshold=threshold, include_similar=include_similar, result=result)
 
 
+def _resume_path_has_unsafe_component(path: Path) -> bool:
+    """Reject a resumed path when its leaf or any ancestor is link/reparse based."""
+
+    return any(linked(part) for part in (path, *path.parents))
+
+
 def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20) -> SessionAudit:
-    """Drop stale session members before review without touching any source file.
+    """Drop stale session members before review without touching source contents.
 
     A resumed session can outlive the files it describes. This preflight compares
-    each saved member with its current filesystem signature and rejects missing,
-    changed, unavailable or linked/reparse entries. It also restores the scanner's
-    invariant that one physical file identity can appear only once, so a stale or
-    hand-edited session cannot present hardlink aliases as independent copies.
-    Groups are rebuilt only from surviving members and groups with fewer than two
-    members are dropped.
+    each saved member with its current filesystem signature, rejects link/reparse
+    ancestry, and binds acceptance to the metadata of one opened file handle. A
+    path replacement before or during the audit therefore fails closed instead of
+    presenting stale scan metadata as current review evidence.
+
+    The audit also restores the scanner invariant that one physical file identity
+    can appear only once, so a stale or hand-edited session cannot present hardlink
+    aliases as independent copies. Groups are rebuilt only from surviving members
+    and groups with fewer than two members are dropped.
 
     This is deliberately *not* a content-hash safety check. It keeps resume fast
     for large libraries; cleanup still performs the normal full hash/content
@@ -246,12 +255,34 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
             detail_lines.append(f"Session resume skipped {photo.path}: {reason}")
 
     for photo in snapshot.result.photos:
+        expected = (photo.size, photo.modified_ns, photo.device, photo.inode)
         try:
-            if linked(photo.path):
+            if _resume_path_has_unsafe_component(photo.path):
                 unsafe_link_count += 1
-                reject(photo, "link/reparse point")
+                reject(photo, "link/reparse point in path ancestry")
                 continue
-            current = photo.path.stat()
+
+            before = photo.path.stat()
+            if not stat.S_ISREG(before.st_mode) or signature(before) != expected:
+                changed_count += 1
+                reject(photo, "filesystem signature changed since the saved scan")
+                continue
+
+            with photo.path.open("rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if not stat.S_ISREG(opened.st_mode) or signature(opened) != expected:
+                    changed_count += 1
+                    reject(photo, "opened file identity changed since the saved scan")
+                    continue
+
+                # Re-check the live path while the validated object remains open.
+                # A rename/replace between the first stat and open must not leave
+                # stale session metadata in review even if the old handle survives.
+                current = photo.path.stat()
+                if signature(current) != expected or signature(current) != signature(opened):
+                    changed_count += 1
+                    reject(photo, "path changed while the resumed file was audited")
+                    continue
         except FileNotFoundError:
             missing_count += 1
             reject(photo, "file is missing")
@@ -261,14 +292,8 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
             reject(photo, f"file is unavailable ({error})")
             continue
 
-        expected = (photo.size, photo.modified_ns, photo.device, photo.inode)
-        if signature(current) != expected:
-            changed_count += 1
-            reject(photo, "filesystem signature changed since the saved scan")
-            continue
-
-        current_inode = int(current.st_ino)
-        identity = (int(current.st_dev), current_inode)
+        current_inode = int(opened.st_ino)
+        identity = (int(opened.st_dev), current_inode)
         if current_inode and identity in seen_file_identities:
             duplicate_identity_count += 1
             reject(photo, "same physical file is already present in the resumed session")
