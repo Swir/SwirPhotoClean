@@ -61,6 +61,7 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/quality.py",
     "photoclean/recycle.py",
     "photoclean/recycle_evidence.py",
+    "photoclean/recycle_review_cli.py",
     "photoclean/release_attestation.py",
     "photoclean/release_evidence_cli.py",
     "photoclean/review_power.py",
