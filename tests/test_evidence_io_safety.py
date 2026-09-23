@@ -11,6 +11,12 @@ from photoclean import diagnostics
 from photoclean.evidence_io import (
     hardened_atomic_write_json,
     hardened_export_recycle_evidence,
+    hardened_inspect_recycle_evidence,
+    hardened_load_recycle_verification,
+    hardened_read_json_object,
+    hardened_read_manifest_payload,
+    hardened_read_payload_for_transition,
+    hardened_validate_restore_evidence_report,
     install_hardened_evidence_io,
 )
 
@@ -134,25 +140,147 @@ class EvidenceIOSafetyTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertEqual(list(Path(folder).glob(".evidence.json.*.tmp")), [])
 
-    def test_install_rebinds_diagnostics_writer_and_exporter(self):
-        old_writer = diagnostics._atomic_write_json
-        old_exporter = diagnostics.export_recycle_evidence
-        recycle_module = sys.modules.get("photoclean.recycle_evidence")
-        old_cli_writer = getattr(recycle_module, "_atomic_write_json", None)
-        old_cli_exporter = getattr(recycle_module, "export_recycle_evidence", None)
+    def test_manifest_hardlink_is_rejected_before_validation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            check = diagnostics.create_recycle_verification(folder)
+            alias = Path(folder) / "manifest-hardlink.json"
+            try:
+                os.link(check.manifest, alias)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"hardlinks unavailable: {error}")
+
+            with self.assertRaisesRegex(
+                diagnostics.RecycleVerificationError,
+                "must not be hardlinked",
+            ):
+                hardened_load_recycle_verification(alias)
+
+    def test_manifest_symlink_parent_is_rejected_without_resolving_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            real_parent = root / "real"
+            real_parent.mkdir()
+            check = diagnostics.create_recycle_verification(real_parent)
+            linked_folder = root / "linked-fixture"
+            try:
+                linked_folder.symlink_to(check.folder, target_is_directory=True)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"directory symlinks unavailable: {error}")
+
+            linked_manifest = linked_folder / check.manifest.name
+            with self.assertRaisesRegex(
+                diagnostics.RecycleVerificationError,
+                "directory ancestry",
+            ):
+                hardened_load_recycle_verification(linked_manifest)
+
+    def test_manifest_path_swap_between_lstat_and_open_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            check = diagnostics.create_recycle_verification(folder)
+            manifest = check.manifest
+            replacement = Path(folder) / "replacement.json"
+            shutil.copy2(manifest, replacement)
+            original_open = os.open
+            swapped = False
+
+            def swap_then_open(path, flags):
+                nonlocal swapped
+                if not swapped and Path(path) == manifest:
+                    swapped = True
+                    backup = Path(folder) / "original-manifest.json"
+                    manifest.replace(backup)
+                    replacement.replace(manifest)
+                return original_open(path, flags)
+
+            with mock.patch(
+                "photoclean.evidence_io.os.open",
+                side_effect=swap_then_open,
+            ):
+                with self.assertRaisesRegex(
+                    diagnostics.RecycleVerificationError,
+                    "changed while it was being opened",
+                ):
+                    hardened_load_recycle_verification(manifest)
+
+    def test_manifest_snapshot_drives_inspection_and_export(self):
+        with tempfile.TemporaryDirectory() as folder:
+            verified = self._verified_fixture(folder)
+            loaded = hardened_load_recycle_verification(verified.manifest)
+            inspection = hardened_inspect_recycle_evidence(loaded)
+            self.assertTrue(inspection.valid)
+            self.assertEqual(inspection.stage, "restored-verified")
+
+            report = hardened_export_recycle_evidence(
+                loaded,
+                Path(folder) / "stable-report.json",
+            )
+            payload = hardened_read_json_object(
+                report,
+                max_bytes=2 * 1024 * 1024,
+                label="Recycle evidence report",
+            )
+            self.assertEqual(
+                payload["manifest"]["manifest_fingerprint"],
+                loaded.manifest_fingerprint,
+            )
+            self.assertEqual(
+                payload["inspection"]["manifest_fingerprint"],
+                loaded.manifest_fingerprint,
+            )
+
+    def test_install_rebinds_readers_writer_exporter_and_validator(self):
+        from photoclean import recycle_evidence
+
+        old_diagnostics = {
+            "_atomic_write_json": diagnostics._atomic_write_json,
+            "load_recycle_verification": diagnostics.load_recycle_verification,
+            "_read_payload_for_transition": diagnostics._read_payload_for_transition,
+            "inspect_recycle_evidence": diagnostics.inspect_recycle_evidence,
+            "export_recycle_evidence": diagnostics.export_recycle_evidence,
+        }
+        old_workflow = {
+            "load_recycle_verification": recycle_evidence.load_recycle_verification,
+            "_atomic_write_json": recycle_evidence._atomic_write_json,
+            "_read_manifest_payload": recycle_evidence._read_manifest_payload,
+            "inspect_recycle_evidence": recycle_evidence.inspect_recycle_evidence,
+            "export_recycle_evidence": recycle_evidence.export_recycle_evidence,
+            "validate_restore_evidence_report": recycle_evidence.validate_restore_evidence_report,
+        }
         try:
             install_hardened_evidence_io()
-            self.assertIs(diagnostics._atomic_write_json, hardened_atomic_write_json)
+            self.assertIs(
+                diagnostics._atomic_write_json,
+                hardened_atomic_write_json,
+            )
+            self.assertIs(
+                diagnostics.load_recycle_verification,
+                hardened_load_recycle_verification,
+            )
+            self.assertIs(
+                diagnostics._read_payload_for_transition,
+                hardened_read_payload_for_transition,
+            )
+            self.assertIs(
+                diagnostics.inspect_recycle_evidence,
+                hardened_inspect_recycle_evidence,
+            )
             self.assertIs(
                 diagnostics.export_recycle_evidence,
                 hardened_export_recycle_evidence,
             )
+            self.assertIs(
+                recycle_evidence._read_manifest_payload,
+                hardened_read_manifest_payload,
+            )
+            self.assertIs(
+                recycle_evidence.validate_restore_evidence_report,
+                hardened_validate_restore_evidence_report,
+            )
         finally:
-            diagnostics._atomic_write_json = old_writer
-            diagnostics.export_recycle_evidence = old_exporter
-            if recycle_module is not None:
-                recycle_module._atomic_write_json = old_cli_writer
-                recycle_module.export_recycle_evidence = old_cli_exporter
+            for name, value in old_diagnostics.items():
+                setattr(diagnostics, name, value)
+            for name, value in old_workflow.items():
+                setattr(recycle_evidence, name, value)
 
     def test_application_bootstrap_installs_hardening_before_runtime_dispatch(self):
         run_py = Path(__file__).resolve().parents[1] / "run.py"
