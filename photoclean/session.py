@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,9 @@ MAX_SESSION_BYTES = 64 * 1024 * 1024
 MAX_PHOTOS = 250_000
 MAX_GROUPS = 250_000
 MAX_WARNINGS = 20_000
+_REPARSE_POINT_ATTRIBUTE = 0x400
+
+SessionTargetIdentity = tuple[int, int, int, int, int, int]
 
 
 class SessionError(ValueError):
@@ -322,15 +326,72 @@ def audit_session_snapshot(snapshot: SessionSnapshot, *, detail_limit: int = 20)
     )
 
 
-def save_session(snapshot: SessionSnapshot, destination):
-    """Atomically persist a scan snapshot; no image bytes or deletion marks are saved."""
+def _absolute_without_resolving(path) -> Path:
+    """Return an absolute destination path while preserving its final entry."""
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
 
-    destination = Path(destination)
+
+def _paths_alias(first: Path, second: Path) -> bool:
+    """Detect lexical aliases plus existing hardlink/symlink aliases."""
+    first_text = os.path.normcase(os.path.abspath(os.fspath(first)))
+    second_text = os.path.normcase(os.path.abspath(os.fspath(second)))
+    if first_text == second_text:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _safe_session_target_identity(path: Path) -> SessionTargetIdentity | None:
+    """Snapshot an existing save target or reject unsafe filesystem objects."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise SessionError(f"cannot safely inspect session destination {path}: {error}") from error
+
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise SessionError(
+            "session destination must not be a symlink, junction or reparse point"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise SessionError("session destination must be a regular file")
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise SessionError("session destination must not be hardlinked")
+
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _ensure_session_target_not_photo(snapshot: SessionSnapshot, target: Path) -> None:
+    """Never let session persistence replace a photo represented by the snapshot."""
+    for photo in snapshot.result.photos:
+        if _paths_alias(target, photo.path):
+            raise SessionError("session destination cannot overwrite or alias a scanned photo")
+
+
+def save_session(snapshot: SessionSnapshot, destination):
+    """Safely persist a scan snapshot without replacing any scanned photo."""
+
+    destination = _absolute_without_resolving(destination)
     payload = json.dumps(snapshot_to_dict(snapshot), ensure_ascii=False, separators=(",", ":"))
     encoded = payload.encode("utf-8")
     if len(encoded) > MAX_SESSION_BYTES:
         raise SessionError("session snapshot exceeds the supported size")
     destination.parent.mkdir(parents=True, exist_ok=True)
+
+    _ensure_session_target_not_photo(snapshot, destination)
+    expected_identity = _safe_session_target_identity(destination)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile("wb", dir=destination.parent, delete=False) as stream:
@@ -338,6 +399,12 @@ def save_session(snapshot: SessionSnapshot, destination):
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
+
+        # Re-check both the protected source aliases and destination identity after
+        # staging. A path swapped while bytes are being prepared must fail closed.
+        _ensure_session_target_not_photo(snapshot, destination)
+        if _safe_session_target_identity(destination) != expected_identity:
+            raise SessionError("session destination changed while validated bytes were staged")
         os.replace(temporary, destination)
     finally:
         if temporary is not None:
