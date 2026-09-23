@@ -111,23 +111,57 @@ def signature(info):
     return info.st_size, info.st_mtime_ns, info.st_dev, info.st_ino
 
 
+def _sha256_stream(stream, cancel: threading.Event, profile: PerformanceProfile) -> str:
+    """Hash one already-open file handle with cooperative cancellation/yielding."""
+
+    stream.seek(0)
+    digest = hashlib.sha256()
+    bytes_since_yield = 0
+    while chunk := stream.read(profile.hash_chunk_bytes):
+        checkpoint(cancel)
+        digest.update(chunk)
+        if profile.cooperative_yield_bytes:
+            bytes_since_yield += len(chunk)
+            if bytes_since_yield >= profile.cooperative_yield_bytes:
+                # Yield the worker thread without adding an artificial delay.
+                time.sleep(0)
+                bytes_since_yield = 0
+                checkpoint(cancel)
+    return digest.hexdigest()
+
+
 def sha256(path: Path, cancel: threading.Event, performance_profile: str | PerformanceProfile | None = None) -> str:
     """Hash a file with profile-specific I/O chunks and cooperative yielding."""
     profile = get_performance_profile(performance_profile)
-    digest = hashlib.sha256()
-    bytes_since_yield = 0
     with path.open("rb") as stream:
-        while chunk := stream.read(profile.hash_chunk_bytes):
-            checkpoint(cancel)
-            digest.update(chunk)
-            if profile.cooperative_yield_bytes:
-                bytes_since_yield += len(chunk)
-                if bytes_since_yield >= profile.cooperative_yield_bytes:
-                    # Yield the worker thread without adding an artificial delay.
-                    time.sleep(0)
-                    bytes_since_yield = 0
-                    checkpoint(cancel)
-    return digest.hexdigest()
+        return _sha256_stream(stream, cancel, profile)
+
+
+def _changed_during_scan(path: Path) -> ScanIssueError:
+    return ScanIssueError("changed_during_scan", tr('plik zmienił się podczas skanowania'))
+
+
+def _require_bound_scan_stream(path: Path, expected, stream):
+    """Bind one opened scanner handle to the pre-open filesystem object.
+
+    Exact hashing and pixel analysis must describe the same file object. A pathname
+    can otherwise be replaced between the hash open and Pillow's later path open.
+    Use the scanner's existing size/mtime/device/inode identity for the binding and
+    fail closed into the structured ``changed_during_scan`` diagnostic.
+    """
+
+    opened = os.fstat(stream.fileno())
+    if not stat.S_ISREG(opened.st_mode) or signature(opened) != signature(expected):
+        raise _changed_during_scan(path)
+    return opened
+
+
+def _require_stable_scan_stream(path: Path, expected, stream) -> None:
+    """Fail if the bound file handle changed while hash/decode work was running."""
+
+    current = os.fstat(stream.fileno())
+    if not stat.S_ISREG(current.st_mode) or signature(current) != signature(expected):
+        raise _changed_during_scan(path)
 
 
 def _exif_orientation(image: Image.Image) -> int:
@@ -174,51 +208,58 @@ def read_photo(
     performance_profile: str | PerformanceProfile | None = None,
     analysis_cache: dict[str, Photo] | None = None,
 ) -> Photo:
-    """Read one photo, reusing pixel analysis only for verified exact SHA-256 copies.
+    """Read one stable file object and reuse analysis for verified exact copies.
 
-    The file is always fully hashed first and its filesystem signature is still
-    revalidated afterwards. When a previous successfully decoded photo has the
-    same full SHA-256 digest, dimensions/dHash/color analysis can be reused because
-    the scanner already treats that digest as exact-duplicate evidence. This avoids
-    repeatedly decoding identical large images without weakening cleanup safety.
+    One bound binary handle now supplies both the full SHA-256 digest and, for a
+    previously unseen digest, Pillow's pixel decode. This prevents a pathname swap
+    from making the exact hash describe one object while dimensions/dHash/color
+    describe another. The handle and pathname are revalidated afterwards. Exact
+    duplicate semantics remain full-file SHA-256 and cached copies still skip only
+    redundant pixel decoding, never hashing.
     """
 
     profile = get_performance_profile(performance_profile)
     checkpoint(cancel)
     before = path.stat()
-    digest = sha256(path, cancel, profile)
-    checkpoint(cancel)
 
-    cached = analysis_cache.get(digest) if analysis_cache is not None else None
-    if cached is not None:
-        width, height, bits, color = cached.width, cached.height, cached.dhash, cached.color
+    with path.open("rb") as stream:
+        opened = _require_bound_scan_stream(path, before, stream)
+        digest = _sha256_stream(stream, cancel, profile)
+        _require_stable_scan_stream(path, opened, stream)
         checkpoint(cancel)
-    else:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(path) as source:
-                checkpoint(cancel)
-                if source.width * source.height > MAX_PIXELS:
-                    raise ScanIssueError("pixel_limit", tr('obraz przekracza limit 40 megapikseli'))
-                if getattr(source, "n_frames", 1) > 1:
-                    raise ScanIssueError("multi_frame", tr('obraz animowany lub wielostronicowy — pominięty'))
-                rgb = _analysis_rgb(source)
-                checkpoint(cancel)
-                width, height = rgb.size
-                gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
-                checkpoint(cancel)
-                bits = 0
-                for y in range(8):
-                    for x in range(8):
-                        bits = (bits << 1) | (gray[y * 9 + x] > gray[y * 9 + x + 1])
-                # Low-resolution RGB signature prevents flat, different-color images
-                # with identical gradient hashes from becoming false matches.
-                color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
-                checkpoint(cancel)
+
+        cached = analysis_cache.get(digest) if analysis_cache is not None else None
+        if cached is not None:
+            width, height, bits, color = cached.width, cached.height, cached.dhash, cached.color
+            checkpoint(cancel)
+        else:
+            stream.seek(0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(stream) as source:
+                    checkpoint(cancel)
+                    if source.width * source.height > MAX_PIXELS:
+                        raise ScanIssueError("pixel_limit", tr('obraz przekracza limit 40 megapikseli'))
+                    if getattr(source, "n_frames", 1) > 1:
+                        raise ScanIssueError("multi_frame", tr('obraz animowany lub wielostronicowy — pominięty'))
+                    rgb = _analysis_rgb(source)
+                    checkpoint(cancel)
+                    width, height = rgb.size
+                    gray = rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS).tobytes()
+                    checkpoint(cancel)
+                    bits = 0
+                    for y in range(8):
+                        for x in range(8):
+                            bits = (bits << 1) | (gray[y * 9 + x] > gray[y * 9 + x + 1])
+                    # Low-resolution RGB signature prevents flat, different-color images
+                    # with identical gradient hashes from becoming false matches.
+                    color = rgb.resize((8, 8), Image.Resampling.LANCZOS).tobytes()
+                    checkpoint(cancel)
+            _require_stable_scan_stream(path, opened, stream)
 
     after = path.stat()
-    if signature(before) != signature(after):
-        raise ScanIssueError("changed_during_scan", tr('plik zmienił się podczas skanowania'))
+    if signature(opened) != signature(after):
+        raise _changed_during_scan(path)
     return Photo(path, *signature(after), digest, width, height, bits, color)
 
 
