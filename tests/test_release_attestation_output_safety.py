@@ -59,7 +59,13 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
                 self.skipTest(f"hardlinks unavailable in test environment: {error}")
             before = report.read_bytes()
 
-            with self.assertRaisesRegex(PackagedAttestationError, "overwrite or alias"):
+            # The newer snapshot intake can reject the now-hardlinked source report
+            # before the writer reaches its output-alias guard. Both paths are
+            # deliberately fail-closed and must preserve both filesystem entries.
+            with self.assertRaisesRegex(
+                PackagedAttestationError,
+                "overwrite or alias|must not be hardlinked",
+            ):
                 write_packaged_attestation(
                     report,
                     alias,
