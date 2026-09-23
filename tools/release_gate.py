@@ -279,12 +279,18 @@ def _read_runtime_evidence(*, required: bool) -> bool:
             validate_release_evidence,
         )
 
-    if not RELEASE_EVIDENCE_PATH.exists():
+    try:
+        RELEASE_EVIDENCE_PATH.lstat()
+    except FileNotFoundError:
         if required:
             raise ReleaseGateError(
                 f"qualified release requires valid {RELEASE_EVIDENCE_PATH.name}: file is missing"
             )
         return False
+    except OSError as error:
+        raise ReleaseGateError(
+            f"cannot inspect {RELEASE_EVIDENCE_PATH.name} before release evaluation: {error}"
+        ) from error
 
     try:
         payload = _read_stable_runtime_evidence_payload(RELEASE_EVIDENCE_PATH)

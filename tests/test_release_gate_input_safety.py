@@ -109,6 +109,22 @@ class ReleaseGateInputSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ReleaseGateError, "UTF-8 JSON"):
                 _read_stable_runtime_evidence_payload(evidence)
 
+    def test_optional_gate_does_not_ignore_dangling_symlink_entry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            alias = Path(folder) / "RELEASE_EVIDENCE.json"
+            missing = Path(folder) / "missing.json"
+            try:
+                os.symlink(missing, alias)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"symlinks unavailable in test environment: {error}")
+
+            with patch("tools.release_evidence.RELEASE_EVIDENCE_PATH", alias):
+                with self.assertRaisesRegex(
+                    ReleaseGateError,
+                    "symlink, junction or reparse point",
+                ):
+                    _read_runtime_evidence(required=False)
+
     def test_qualified_gate_rejects_hardlinked_runtime_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "source.json"
