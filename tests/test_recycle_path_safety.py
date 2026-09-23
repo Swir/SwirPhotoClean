@@ -82,6 +82,25 @@ class RecyclePathSafetyTests(unittest.TestCase):
 
             self.assertEqual(digest, hashlib.sha256(b"safe").hexdigest())
 
+    def test_stable_digest_rejects_different_open_handle(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            candidate = (root / "photo.png").absolute()
+            decoy = (root / "decoy.png").absolute()
+            candidate.write_bytes(b"safe")
+            decoy.write_bytes(b"evil")
+            expected_identity = _file_identity(candidate)
+            original_open = Path.open
+
+            def redirected_open(path, *args, **kwargs):
+                if Path(path) == candidate:
+                    return original_open(decoy, *args, **kwargs)
+                return original_open(path, *args, **kwargs)
+
+            with patch.object(Path, "open", redirected_open):
+                with self.assertRaisesRegex(OSError, "Plik zmienił się"):
+                    _stable_file_sha256(candidate, expected_identity)
+
     def test_content_guard_rejects_digest_mismatch_even_if_metadata_guard_accepts(self):
         with tempfile.TemporaryDirectory() as folder:
             candidate = (Path(folder) / "photo.png").absolute()
