@@ -29,6 +29,8 @@ For very large groups, detailed quality analysis is bounded to the strongest str
 
 A cached quality result is only a review aid for the exact scan record that produced it. Before and after each quality access, SWIR PhotoClean rechecks the file's scan-time size, modification timestamp and available filesystem identity and rejects symlink/reparse replacements. If a reviewed file disappears or changes after the scan, its quality evidence becomes unavailable instead of silently serving a stale cached recommendation.
 
+Only successful analyses enter the quality cache. A temporary sharing violation, decoder/read error or similar transient failure is reported as unavailable for that attempt but is retried on the next review request instead of poisoning the session with a sticky negative cache entry.
+
 This guard is deliberately cheaper than the destructive-path validation. It does **not** replace the full SHA-256 revalidation performed before any Recycle Bin operation.
 
 ## Important limitations

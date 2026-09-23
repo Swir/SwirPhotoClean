@@ -137,6 +137,30 @@ class PhotoQualityTests(unittest.TestCase):
             self.assertFalse(second.available)
             self.assertTrue(second.error)
 
+    def test_transient_read_failure_does_not_poison_quality_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "flaky.png"
+            checkerboard().save(path)
+            photo = as_photo(path, digest="4" * 64)
+            real_image_open = Image.open
+            attempts = 0
+
+            def flaky_open(*args, **kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise OSError("temporary sharing violation")
+                return real_image_open(*args, **kwargs)
+
+            with patch("photoclean.quality.Image.open", side_effect=flaky_open):
+                first = assess_photo(photo)
+                second = assess_photo(photo)
+
+            self.assertFalse(first.available)
+            self.assertIn("temporary sharing violation", first.error)
+            self.assertTrue(second.available)
+            self.assertEqual(attempts, 2)
+
     def test_changed_scan_identity_is_rejected_before_quality_recommendation(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "changed.png"

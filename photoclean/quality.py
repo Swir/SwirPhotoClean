@@ -135,72 +135,75 @@ def _quality_sample(source: Image.Image, max_side: int) -> Image.Image:
 
 @lru_cache(maxsize=512)
 def _assess_photo_cached(photo: Photo, max_side: int) -> PhotoQuality:
-    """Compute one quality score after the public wrapper validates scan identity."""
+    """Compute one successful quality score after scan-identity validation.
 
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(photo.path) as source:
-                image = _quality_sample(source, max_side)
-                if image.width < 3 or image.height < 3:
-                    raise ValueError("image sample is too small")
+    Read/decode failures intentionally propagate to the public wrapper. ``lru_cache``
+    does not cache exceptions, so a transient sharing/decoder error cannot poison
+    the review session with a permanently unavailable result for an unchanged file.
+    """
 
-                histogram = image.histogram()
-                pixel_count = max(1, image.width * image.height)
-                dark_clip = 100.0 * sum(histogram[:8]) / pixel_count
-                light_clip = 100.0 * sum(histogram[248:]) / pixel_count
-                mean_luma = float(ImageStat.Stat(image).mean[0])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(photo.path) as source:
+            image = _quality_sample(source, max_side)
+            if image.width < 3 or image.height < 3:
+                raise ValueError("image sample is too small")
 
-                # FIND_EDGES is intentionally simple and deterministic. Cropping the
-                # one-pixel border avoids the artificial frame introduced by the
-                # convolution at image boundaries.
-                edges = image.filter(ImageFilter.FIND_EDGES)
-                if edges.width > 4 and edges.height > 4:
-                    edges = edges.crop((2, 2, edges.width - 2, edges.height - 2))
-                edge_mean = float(ImageStat.Stat(edges).mean[0])
-                sharpness = _clamp((edge_mean - 1.5) * 5.0)
+            histogram = image.histogram()
+            pixel_count = max(1, image.width * image.height)
+            dark_clip = 100.0 * sum(histogram[:8]) / pixel_count
+            light_clip = 100.0 * sum(histogram[248:]) / pixel_count
+            mean_luma = float(ImageStat.Stat(image).mean[0])
 
-                clipping_penalty = min(80.0, (dark_clip + light_clip) * 1.6)
-                brightness_penalty = 0.0
-                if mean_luma < 32.0:
-                    brightness_penalty = min(35.0, (32.0 - mean_luma) * 1.1)
-                elif mean_luma > 223.0:
-                    brightness_penalty = min(35.0, (mean_luma - 223.0) * 1.1)
-                exposure = _clamp(100.0 - clipping_penalty - brightness_penalty)
-                overall = _clamp(0.70 * sharpness + 0.30 * exposure)
+            # FIND_EDGES is intentionally simple and deterministic. Cropping the
+            # one-pixel border avoids the artificial frame introduced by the
+            # convolution at image boundaries.
+            edges = image.filter(ImageFilter.FIND_EDGES)
+            if edges.width > 4 and edges.height > 4:
+                edges = edges.crop((2, 2, edges.width - 2, edges.height - 2))
+            edge_mean = float(ImageStat.Stat(edges).mean[0])
+            sharpness = _clamp((edge_mean - 1.5) * 5.0)
 
-                notes: list[str] = []
-                if sharpness < 25.0:
-                    notes.append("soft")
-                if dark_clip >= 8.0:
-                    notes.append("dark-clipping")
-                if light_clip >= 8.0:
-                    notes.append("light-clipping")
-                if not notes:
-                    notes.append("balanced")
+            clipping_penalty = min(80.0, (dark_clip + light_clip) * 1.6)
+            brightness_penalty = 0.0
+            if mean_luma < 32.0:
+                brightness_penalty = min(35.0, (32.0 - mean_luma) * 1.1)
+            elif mean_luma > 223.0:
+                brightness_penalty = min(35.0, (mean_luma - 223.0) * 1.1)
+            exposure = _clamp(100.0 - clipping_penalty - brightness_penalty)
+            overall = _clamp(0.70 * sharpness + 0.30 * exposure)
 
-                return PhotoQuality(
-                    photo=photo,
-                    available=True,
-                    overall_score=round(overall, 2),
-                    sharpness_score=round(sharpness, 2),
-                    exposure_score=round(exposure, 2),
-                    dark_clip_percent=round(dark_clip, 2),
-                    light_clip_percent=round(light_clip, 2),
-                    mean_luma=round(mean_luma, 2),
-                    notes=tuple(notes),
-                )
-    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
-        return _unavailable(photo, error)
+            notes: list[str] = []
+            if sharpness < 25.0:
+                notes.append("soft")
+            if dark_clip >= 8.0:
+                notes.append("dark-clipping")
+            if light_clip >= 8.0:
+                notes.append("light-clipping")
+            if not notes:
+                notes.append("balanced")
+
+            return PhotoQuality(
+                photo=photo,
+                available=True,
+                overall_score=round(overall, 2),
+                sharpness_score=round(sharpness, 2),
+                exposure_score=round(exposure, 2),
+                dark_clip_percent=round(dark_clip, 2),
+                light_clip_percent=round(light_clip, 2),
+                mean_luma=round(mean_luma, 2),
+                notes=tuple(notes),
+            )
 
 
 def assess_photo(photo: Photo, max_side: int = 384) -> PhotoQuality:
     """Analyze sharpness/exposure on a bounded, scan-identity-checked sample.
 
-    The review score is cached, but the path is revalidated before and after every
-    access so a removed, replaced, relinked or otherwise changed scan result cannot
-    keep serving a stale cached quality recommendation. This is a review guard, not
-    a replacement for the full SHA-256 revalidation used by Recycle Bin cleanup.
+    Successful review scores are cached, but the path is revalidated before and
+    after every access so a removed, replaced, relinked or otherwise changed scan
+    result cannot keep serving stale quality evidence. Transient read/decode errors
+    are returned as unavailable without entering the cache. This is a review guard,
+    not a replacement for the full SHA-256 revalidation used by Recycle Bin cleanup.
     """
 
     if max_side < 64 or max_side > 1024:
@@ -213,7 +216,10 @@ def assess_photo(photo: Photo, max_side: int = 384) -> PhotoQuality:
     if _unsafe_path(before) or not _scan_identity_matches(photo, before):
         return _unavailable(photo, "file changed or became unsafe since scan")
 
-    assessment = _assess_photo_cached(photo, max_side)
+    try:
+        assessment = _assess_photo_cached(photo, max_side)
+    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
+        return _unavailable(photo, error)
 
     try:
         after = photo.path.lstat()
