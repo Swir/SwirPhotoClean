@@ -105,20 +105,19 @@ class RecyclePathSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             candidate = (Path(folder) / "photo.png").absolute()
             candidate.write_bytes(b"safe")
-            expected_identity = _file_identity(candidate)
             expected_digest = hashlib.sha256(b"safe").hexdigest()
-            candidate.write_bytes(b"evil")  # same length: exercise the content signal itself
+            candidate.write_bytes(b"evil")  # same length: isolate the content signal itself
+            # Snapshot the mutated file's current metadata so both the path guard
+            # and the new handle-binding guard deliberately accept it. The only
+            # remaining mismatch is therefore the previously captured digest.
+            expected_identity = _file_identity(candidate)
 
-            with patch(
-                "photoclean.recycle._require_same_regular_file_target",
-                return_value=candidate,
-            ):
-                with self.assertRaisesRegex(OSError, "Zawartość pliku zmieniła się"):
-                    _require_same_file_content(
-                        candidate,
-                        expected_identity,
-                        expected_digest,
-                    )
+            with self.assertRaisesRegex(OSError, "Zawartość pliku zmieniła się"):
+                _require_same_file_content(
+                    candidate,
+                    expected_identity,
+                    expected_digest,
+                )
 
     def test_missing_target_fails_closed_before_shell_recycle(self):
         with tempfile.TemporaryDirectory() as folder:
