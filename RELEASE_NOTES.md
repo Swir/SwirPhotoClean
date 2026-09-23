@@ -17,6 +17,7 @@ SWIR PhotoClean 1.0.0 to lokalny, review-first cleaner zdjęć dla Windows 10/11
 - Packaged evidence workflow wiążący fizyczny test Recycle/Restore z dokładnym release safety contractem i wersją 1.0.0.
 - Produkcyjny Recycle/Restore zapisuje teraz receipt tożsamości obiektu systemu plików zwrócony przez Windows Shell; jeżeli system udostępnia stabilny file index/inode, ręcznie przywrócony plik musi być tym samym obiektem, który faktycznie trafił do Kosza, więc identyczna bajtowo nowa kopia nie może podszyć się pod Restore evidence.
 - Zapis `RELEASE_EVIDENCE.json` jest fail-closed: nie może nadpisać ani aliasować surowego raportu Recycle/Restore, odrzuca niebezpieczny istniejący cel i używa unikalnego stagingu z fsync, walidacją oraz atomową podmianą.
+- Odczyt raportu Recycle/Restore do attestacji jest teraz fail-closed: używa jednego ograniczonego wielkością uchwytu, odrzuca symlinki/junction/reparse i hardlinki oraz wykrywa zmianę tożsamości/metadanych pliku w trakcie snapshotu.
 
 Rozpakuj cały ZIP i uruchom `SwirPhotoClean.exe`. Nie przenoś samego EXE poza folder aplikacji.
 
@@ -37,6 +38,7 @@ SWIR PhotoClean 1.0.0 is a local, review-first photo cleaner for Windows 10/11. 
 - Packaged evidence workflow binding the physical Recycle/Restore test to the exact release safety contract and 1.0.0 version identity.
 - Production Recycle/Restore now records a filesystem-object identity receipt returned by Windows Shell; when the filesystem exposes a stable file index/inode, the manually restored file must be the same object that was actually moved to Recycle Bin, so a newly recreated byte-identical copy cannot impersonate Restore evidence.
 - `RELEASE_EVIDENCE.json` persistence is fail-closed: it cannot overwrite or alias the raw Recycle/Restore report, rejects an unsafe existing target, and uses exclusive randomized staging with fsync, validation, and atomic replacement.
+- Recycle/Restore report intake for attestation is now fail-closed: it uses one size-bounded file handle, rejects symlink/junction/reparse and hardlink inputs, and detects file identity/metadata changes during snapshotting.
 
 Extract the entire ZIP and launch `SwirPhotoClean.exe`. Keep the executable with its accompanying files.
 
