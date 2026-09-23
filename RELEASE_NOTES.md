@@ -7,6 +7,7 @@ SWIR PhotoClean 1.0.0 to lokalny, review-first cleaner zdjęć dla Windows 10/11
 ### Najważniejsze zmiany
 
 - Dokładne duplikaty oparte na pełnym SHA-256 oraz ostrożne wykrywanie podobnych zdjęć wymagające ręcznego review.
+- Difference View ogranicza duże źródła do wspólnego rozmiaru analizy przed wczytaniem drugiego obrazu, co wyraźnie zmniejsza szczytowe zużycie RAM podczas pełnoekranowego porównania dużych zdjęć bez zmiany semantyki wyniku.
 - Smart Keep, Folder Health, bezpieczne Session Save / Resume i pełnoekranowe porównanie zdjęć z zoomem oraz panoramowaniem.
 - Burst Cleaner i dodatkowe insighty jakościowe wspierające wybór najlepszej kopii bez automatycznego zaznaczania plików do usunięcia.
 - Profile wydajności, anulowanie skanowania, diagnostyka problemów, obsługa uszkodzonych plików, długich ścieżek i błędów dostępu.
@@ -25,6 +26,7 @@ SWIR PhotoClean 1.0.0 is a local, review-first photo cleaner for Windows 10/11. 
 ### Highlights
 
 - Exact duplicate detection based on full SHA-256 plus conservative similar-photo detection that always requires human review.
+- Difference View bounds a large source to the shared analysis size before loading the second image, substantially reducing peak RAM during fullscreen comparison of large photos without changing result semantics.
 - Smart Keep, Folder Health, safe Session Save / Resume, and fullscreen photo comparison with zoom and pan.
 - Burst Cleaner and quality insights that help choose the best copy without automatically marking files for removal.
 - Performance profiles, scan cancellation, diagnostics, corrupt-file resilience, long-path handling, and access-error reporting.

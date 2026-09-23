@@ -3,11 +3,12 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw
 
 from photoclean.core import read_photo
-from photoclean.difference import build_difference_preview
+from photoclean.difference import _load_rgb, build_difference_preview
 
 
 def photo(path: Path):
@@ -60,6 +61,41 @@ class DifferenceTests(unittest.TestCase):
             self.assertLessEqual(max(preview.report.analysis_size), 600)
             self.assertEqual(preview.heatmap.size, preview.report.analysis_size)
             self.assertEqual(preview.report.changed_ratio, 0.0)
+
+    def test_large_sources_receive_bounded_target_before_decode(self):
+        with tempfile.TemporaryDirectory() as folder:
+            left = Path(folder) / "left.png"
+            right = Path(folder) / "right.png"
+            Image.new("RGB", (2400, 1600), "#335577").save(left)
+            Image.new("RGB", (1200, 800), "#335577").save(right)
+            left_photo = photo(left)
+            right_photo = photo(right)
+
+            with patch("photoclean.difference._load_rgb", wraps=_load_rgb) as loader:
+                preview = build_difference_preview(
+                    left_photo,
+                    right_photo,
+                    max_side=600,
+                )
+
+            self.assertEqual(loader.call_count, 2)
+            self.assertEqual(loader.call_args_list[0].args[1], (600, 400))
+            self.assertEqual(loader.call_args_list[1].args[1], (600, 400))
+            self.assertEqual(preview.report.analysis_size, (600, 400))
+
+    def test_transparent_source_is_matted_to_white_without_alpha_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "transparent.png"
+            source = Image.new("RGBA", (80, 60), (255, 0, 0, 0))
+            source.putpixel((10, 10), (255, 0, 0, 255))
+            source.save(path)
+            item = photo(path)
+
+            loaded = _load_rgb(item, (80, 60))
+
+            self.assertEqual(loaded.mode, "RGB")
+            self.assertEqual(loaded.getpixel((0, 0)), (255, 255, 255))
+            self.assertEqual(loaded.getpixel((10, 10)), (255, 0, 0))
 
     def test_same_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
