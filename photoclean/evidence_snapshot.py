@@ -45,6 +45,28 @@ def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
+def _path_and_handle_identity_match(
+    path_identity: tuple[int, int, int, int, int, int],
+    handle_identity: tuple[int, int, int, int, int, int],
+) -> bool:
+    """Compare lstat/fstat identity without Windows API representation noise.
+
+    CPython on Windows can expose different ``st_dev`` / creation-time details for
+    a path stat versus an already-open CRT handle even when both refer to the same
+    file.  The file index (``st_ino``), link count, size and last-write timestamp
+    are the stable cross-API fields we require there.  Same-API comparisons before
+    and after the read still use the complete identity tuple.
+    """
+    if os.name != "nt":
+        return path_identity == handle_identity
+
+    path_inode = path_identity[1]
+    handle_inode = handle_identity[1]
+    if path_inode <= 0 or handle_inode <= 0 or path_inode != handle_inode:
+        return False
+    return path_identity[2:5] == handle_identity[2:5]
+
+
 def _require_safe_report_entry(path: Path) -> os.stat_result:
     """Inspect a report path without following its final filesystem entry."""
     try:
@@ -98,7 +120,7 @@ def _read_stable_report_bytes(report: Path) -> bytes:
                 "Recycle evidence report became hardlinked while opening"
             )
         opened_identity = _file_identity(opened)
-        if opened_identity != before_identity:
+        if not _path_and_handle_identity_match(before_identity, opened_identity):
             raise RecycleVerificationError(
                 "Recycle evidence report changed while it was being opened"
             )
