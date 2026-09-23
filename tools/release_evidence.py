@@ -287,6 +287,54 @@ def _paths_alias(first: Path, second: Path) -> bool:
         return False
 
 
+def _require_safe_release_evidence_directory_ancestry(
+    directory: Path,
+    *,
+    allow_missing: bool = False,
+) -> None:
+    """Reject redirected lexical output ancestry before writing release evidence.
+
+    The walk deliberately uses ``lstat`` without resolving the path so symlinks,
+    Windows junctions and other reparse points stay visible.  Missing descendants
+    are allowed only during the pre-``mkdir`` check; every existing ancestor must
+    already be an ordinary directory.
+    """
+    current = _absolute_without_resolving(directory)
+    chain: list[Path] = []
+    while True:
+        chain.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for entry in reversed(chain):
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
+            if allow_missing:
+                continue
+            raise ReleaseEvidenceError(
+                f"release evidence output directory does not exist: {entry}"
+            )
+        except OSError as error:
+            raise ReleaseEvidenceError(
+                f"cannot safely inspect release evidence output directory {entry}: {error}"
+            ) from error
+
+        if stat.S_ISLNK(info.st_mode) or bool(
+            getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+        ):
+            raise ReleaseEvidenceError(
+                "release evidence output directory ancestry must not contain symlinks, "
+                f"junctions or reparse points: {entry}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise ReleaseEvidenceError(
+                f"release evidence output directory ancestry contains a non-directory entry: {entry}"
+            )
+
+
 def _release_evidence_input_identity(info) -> tuple[int, int, int, int, int, int]:
     """Normalize metadata used to bind a verified input path to one open handle."""
     return (
@@ -418,7 +466,9 @@ def _read_stable_release_evidence_payload(path: str | Path) -> object:
         ) from error
 
 
-def _release_evidence_output_identity(path: Path) -> tuple[int, int, int, int, int] | None:
+def _release_evidence_output_identity(
+    path: Path,
+) -> tuple[int, int, int, int, int, int] | None:
     """Return output identity or fail closed for unsafe existing output entries."""
     try:
         info = path.lstat()
@@ -437,9 +487,12 @@ def _release_evidence_output_identity(path: Path) -> tuple[int, int, int, int, i
         )
     if not stat.S_ISREG(info.st_mode):
         raise ReleaseEvidenceError("release evidence output must be a regular file")
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise ReleaseEvidenceError("release evidence output must not be hardlinked")
     return (
         int(info.st_dev),
         int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
         int(info.st_size),
         int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
         int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
@@ -449,10 +502,12 @@ def _release_evidence_output_identity(path: Path) -> tuple[int, int, int, int, i
 def _write_validated_atomic_json(
     output: Path,
     payload: dict,
-    expected_output_identity: tuple[int, int, int, int, int] | None,
+    expected_output_identity: tuple[int, int, int, int, int, int] | None,
 ) -> None:
     """Durably stage validated bytes beside the target before one atomic replace."""
     raw = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _require_safe_release_evidence_directory_ancestry(output.parent)
+    _require_safe_release_evidence_directory_ancestry(output.parent)
     try:
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{output.name}.",
@@ -487,6 +542,7 @@ def _write_validated_atomic_json(
             ) from error
         validate_release_evidence(staged_payload)
 
+        _require_safe_release_evidence_directory_ancestry(output.parent)
         if _release_evidence_output_identity(output) != expected_output_identity:
             raise ReleaseEvidenceError(
                 "release evidence output changed while validated bytes were staged"
@@ -517,12 +573,22 @@ def write_release_evidence(
             "release evidence output must not overwrite or alias the raw recycle evidence report"
         )
 
-    expected_output_identity = _release_evidence_output_identity(output)
     payload = build_release_evidence(
         report,
         confirm_manual_restore=confirm_manual_restore,
     )
-    output.parent.mkdir(parents=True, exist_ok=True)
+    _require_safe_release_evidence_directory_ancestry(
+        output.parent,
+        allow_missing=True,
+    )
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ReleaseEvidenceError(
+            f"cannot create release evidence output directory: {error}"
+        ) from error
+    _require_safe_release_evidence_directory_ancestry(output.parent)
+    expected_output_identity = _release_evidence_output_identity(output)
     _write_validated_atomic_json(output, payload, expected_output_identity)
     return output.resolve()
 
