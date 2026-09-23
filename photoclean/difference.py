@@ -32,16 +32,6 @@ class DifferencePreview:
     heatmap: Image.Image
 
 
-def _load_rgb(photo: Photo) -> Image.Image:
-    with Image.open(photo.path) as source:
-        if source.width * source.height > MAX_PIXELS:
-            raise ValueError("Image exceeds the 40 megapixel safety limit")
-        image = ImageOps.exif_transpose(source).convert("RGBA")
-        background = Image.new("RGBA", image.size, "white")
-        background.alpha_composite(image)
-        return background.convert("RGB")
-
-
 def _bounded_size(width: int, height: int, max_side: int) -> tuple[int, int]:
     if max_side < 64:
         raise ValueError("max_side must be at least 64 pixels")
@@ -49,18 +39,52 @@ def _bounded_size(width: int, height: int, max_side: int) -> tuple[int, int]:
     return max(1, round(width * scale)), max(1, round(height * scale))
 
 
-def _normalize_pair(left: Image.Image, right: Image.Image, max_side: int) -> tuple[Image.Image, Image.Image, bool]:
-    target_source = left.size if left.size == right.size else (
-        min(left.width, right.width),
-        min(left.height, right.height),
+def _analysis_target(
+    left_photo: Photo,
+    right_photo: Photo,
+    max_side: int,
+) -> tuple[tuple[int, int], bool]:
+    """Choose the common bounded size before either source is fully decoded.
+
+    ``Photo.width``/``height`` already describe the EXIF-oriented scan result, so
+    the target can be decided from trusted scan metadata. This lets each large
+    source be resized and released before the second source is decoded instead of
+    retaining two full-resolution images at once.
+    """
+
+    left_size = (left_photo.width, left_photo.height)
+    right_size = (right_photo.width, right_photo.height)
+    target_source = left_size if left_size == right_size else (
+        min(left_size[0], right_size[0]),
+        min(left_size[1], right_size[1]),
     )
     target = _bounded_size(*target_source, max_side=max_side)
-    resampled = left.size != target or right.size != target
-    if left.size != target:
-        left = left.resize(target, Image.Resampling.LANCZOS)
-    if right.size != target:
-        right = right.resize(target, Image.Resampling.LANCZOS)
-    return left, right, resampled
+    return target, left_size != target or right_size != target
+
+
+def _load_rgb(photo: Photo, target: tuple[int, int]) -> Image.Image:
+    """Load one EXIF-oriented source and return only the bounded RGB working copy."""
+
+    with Image.open(photo.path) as source:
+        if source.width * source.height > MAX_PIXELS:
+            raise ValueError("Image exceeds the 40 megapixel safety limit")
+        oriented = ImageOps.exif_transpose(source)
+        has_transparency = (
+            oriented.mode in {"RGBA", "LA"} or "transparency" in oriented.info
+        )
+        if has_transparency:
+            rgba = oriented.convert("RGBA")
+            image = Image.new("RGB", rgba.size, "white")
+            image.paste(rgba, mask=rgba.getchannel("A"))
+        elif oriented.mode == "RGB":
+            # Detach the pixels from the source handle before its context closes.
+            image = oriented.copy()
+        else:
+            image = oriented.convert("RGB")
+
+        if image.size != target:
+            image = image.resize(target, Image.Resampling.LANCZOS)
+        return image
 
 
 def build_difference_preview(
@@ -76,11 +100,14 @@ def build_difference_preview(
     if not 0 <= threshold <= 255:
         raise ValueError("threshold must be between 0 and 255")
 
-    left = _load_rgb(left_photo)
-    right = _load_rgb(right_photo)
-    left_original_size = left.size
-    right_original_size = right.size
-    left, right, resampled = _normalize_pair(left, right, max_side)
+    left_original_size = (left_photo.width, left_photo.height)
+    right_original_size = (right_photo.width, right_photo.height)
+    target, resampled = _analysis_target(left_photo, right_photo, max_side)
+
+    # Load and bound sources sequentially. For large camera photos this avoids
+    # keeping two full-resolution decoded images alive at the same time.
+    left = _load_rgb(left_photo, target)
+    right = _load_rgb(right_photo, target)
 
     difference = ImageChops.difference(left, right)
     grayscale = difference.convert("L")
@@ -103,7 +130,7 @@ def build_difference_preview(
         right_path=right_photo.path,
         left_size=left_original_size,
         right_size=right_original_size,
-        analysis_size=left.size,
+        analysis_size=target,
         resampled=resampled,
         mean_delta=mean_delta,
         changed_ratio=changed_ratio,
