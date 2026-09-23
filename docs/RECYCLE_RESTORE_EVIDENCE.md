@@ -29,6 +29,8 @@ The command creates a unique generated verification folder containing:
 
 A successful prepare command prints `MOVE_CONFIRMED` only after the recycle backend reports success, the generated original still has the expected SHA-256/size and `RECYCLE-ME.png` is absent from its original path. The manifest is then in stage `recycled`.
 
+The production Windows backend also returns a fingerprinted recycle receipt containing the source filesystem device/file identity and the Shell parsing name for the newly-created Recycle Bin item. When Windows/Python exposes a stable non-zero file index/inode, prepare prints `FILESYSTEM_IDENTITY_RECEIPT=available`. That receipt is part of the manifest fingerprint and is later used to reject a byte-identical file that was recreated instead of actually restored.
+
 If Windows refuses the move, the helper prints `MOVE_NOT_CONFIRMED` plus the exact prepared manifest path. The manifest stays in stage `prepared`, both generated files remain available, and there is still no permanent-delete fallback.
 
 ### Retry a failed move without recreating the fixture
@@ -78,9 +80,12 @@ Successful verification requires:
 - the manifest fingerprint and ordered event log to be valid,
 - `KEEP-ME.png` to remain the expected regular file with matching size and SHA-256,
 - restored `RECYCLE-ME.png` to be a regular file with matching size and SHA-256,
-- original and restored copy to remain physically distinct (a hardlink cannot fake restore evidence).
+- original and restored copy to remain physically distinct (a hardlink cannot fake restore evidence),
+- when the production recycle receipt contains a stable file index/inode, restored `RECYCLE-ME.png` to have the same filesystem object identity that was captured immediately before the Windows Shell recycle operation.
 
-The command then records stage `restored-verified` and writes `recycle-evidence-report.json` beside the manifest. That report deliberately contains `acceptance_gate_closed: false`; repository status changes still require review of real Windows evidence.
+The last check means copying bytes back from `KEEP-ME.png` is no longer sufficient for production evidence: a recreated byte-identical file has a different filesystem identity and verification fails before the manifest can advance. A genuine same-volume Windows Recycle Bin Restore is expected to move the original filesystem object back to the generated path.
+
+The command then records stage `restored-verified` and writes `recycle-evidence-report.json` beside the manifest. That report deliberately contains `acceptance_gate_closed: false`; repository status changes still require review of real Windows evidence. With receipt-bound evidence, the CLI also prints `FILESYSTEM_IDENTITY_CONTINUITY=yes` after the identity check succeeds.
 
 ### Final read-only report review
 
@@ -95,9 +100,10 @@ The command performs a fresh fixture inspection and requires all of the followin
 - the live manifest is still valid and still at `restored-verified`,
 - the exported report still says `acceptance_gate_closed: false`,
 - the report’s embedded manifest exactly matches the live manifest,
-- the report’s embedded inspection exactly matches a newly computed inspection of both generated files.
+- the report’s embedded inspection exactly matches a newly computed inspection of both generated files,
+- any recorded production recycle receipt still matches the restored file’s current filesystem identity.
 
-A valid report prints `REPORT_VALID` and `READY_FOR_MANUAL_ACCEPTANCE_REVIEW`. A stale, edited, mismatched or malformed report returns `EVIDENCE_FAILED`. The command is read-only: it does not move files, rewrite the manifest/report, or change `STATUS.md`.
+A valid report prints `REPORT_VALID` and `READY_FOR_MANUAL_ACCEPTANCE_REVIEW`. Receipt-bound production evidence additionally prints `FILESYSTEM_IDENTITY_CONTINUITY=yes`. A stale, edited, mismatched, identity-substituted or malformed report returns `EVIDENCE_FAILED`. The command is read-only: it does not move files, rewrite the manifest/report, or change `STATUS.md`.
 
 ### Sanitized release attestation
 
@@ -125,7 +131,7 @@ When a qualified release is actually published, the same validated `RELEASE_EVID
 
 The `restored-verified` manifest transition is deliberately durable. If verification proves the restore but writing `recycle-evidence-report.json` then fails because of a temporary disk or permission problem, **do not repeat the move/restore cycle** and do not edit the manifest. Run the same `--recycle-restore-verify` command again after fixing the write problem.
 
-The retry performs a fresh read-only validation of the manifest plus both generated files, recreates the report, and does not append a duplicate `restored-verified` event. A changed/missing file or tampered manifest is still rejected. This makes release evidence recovery deterministic without weakening the physical restore requirement.
+The retry performs a fresh read-only validation of the manifest plus both generated files, including recorded filesystem identity continuity when available, recreates the report, and does not append a duplicate `restored-verified` event. A changed/missing file or tampered manifest is still rejected. This makes release evidence recovery deterministic without weakening the physical restore requirement.
 
 ## From source
 
@@ -146,11 +152,12 @@ py -3.12 run.py --recycle-restore-review "PATH_TO_recycle-evidence-report.json"
 - There is no `unlink`/permanent-delete fallback in the production move path.
 - Local fixed-drive restrictions remain enforced by `photoclean.recycle`.
 - A move retry revalidates the original/copy contents and requires the manifest to remain at `prepared`.
+- A production recycle receipt is fingerprinted into the local manifest; when stable filesystem identity is available, a recreated copy cannot impersonate the object Windows actually moved and restored.
 - The status and report-review commands are read-only and cannot advance stages.
 - A present report is not considered review-ready until it matches the live manifest and a fresh file inspection.
 - The helper never empties Windows Recycle Bin.
 - The helper never performs restore itself; restore remains an explicit Windows action so the acceptance evidence is physical, not simulated.
-- Unit tests use injected temporary-file recyclers only to validate state transitions and failure safety. Those tests cannot close the physical Windows acceptance gate.
+- Unit tests use injected temporary-file recyclers only to validate state transitions and failure safety. Those tests cannot close the physical Windows acceptance gate. Injected legacy test recyclers that return no receipt remain supported but are reported as `FILESYSTEM_IDENTITY_CONTINUITY=not-recorded`.
 - The sanitized release attestation does not contain or replace raw runtime evidence and can never close the acceptance gate by itself.
 
 ## 1.0 evidence rule
