@@ -3,6 +3,7 @@ import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -143,6 +144,33 @@ class MediaClassificationTests(unittest.TestCase):
             original = self._photo(folder, "a.png")
             missing = replace(original, path=Path(folder) / "gone.png")
             report = analyze_media_types([missing])
+            self.assertEqual(report.unavailable_count, 1)
+            self.assertEqual(report.count("unknown"), 1)
+            self.assertEqual(report.items[0].reasons, ("unavailable",))
+
+    def test_stale_replaced_file_is_unknown_and_counted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            photo = self._photo(folder, "capture.png", size=(1920, 1080))
+            photo.path.write_bytes(photo.path.read_bytes() + b"changed-after-scan")
+
+            report = analyze_media_types([photo])
+
+            self.assertEqual(report.unavailable_count, 1)
+            self.assertEqual(report.count("unknown"), 1)
+            self.assertEqual(report.items[0].reasons, ("unavailable",))
+
+    def test_reparse_ancestor_is_unknown_and_counted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            photo = self._photo(folder, "capture.png", size=(1920, 1080))
+            real_linked = __import__("photoclean.classification", fromlist=["linked"]).linked
+
+            def linked_with_unsafe_root(path):
+                return path == root or real_linked(path)
+
+            with patch("photoclean.classification.linked", side_effect=linked_with_unsafe_root):
+                report = analyze_media_types([photo])
+
             self.assertEqual(report.unavailable_count, 1)
             self.assertEqual(report.count("unknown"), 1)
             self.assertEqual(report.items[0].reasons, ("unavailable",))

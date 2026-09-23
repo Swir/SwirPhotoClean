@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from PIL import ExifTags, Image
 
@@ -136,8 +135,13 @@ def metadata_from_exif(exif) -> ExifMetadata:
     )
 
 
-def read_exif_metadata(path: Path) -> ExifMetadata:
-    """Read the metadata subset without decoding the full image pixel payload."""
+def read_exif_metadata(source) -> ExifMetadata:
+    """Read the metadata subset from a path or an already-bound binary stream.
 
-    with Image.open(path) as image:
+    Accepting a seekable stream lets review features bind EXIF evidence to the
+    exact filesystem object that was scanned instead of reopening a mutable path.
+    Pixel data is not decoded by this helper.
+    """
+
+    with Image.open(source) as image:
         return metadata_from_exif(image.getexif())

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import ExifTags, Image
 
@@ -36,13 +37,14 @@ def make_jpeg(
     image.save(path, format="JPEG", exif=exif)
 
 
-def photo(path: Path, *, digest: str, width=640, height=480, size=1000):
+def photo(path: Path, *, digest: str, width=640, height=480):
+    info = path.stat()
     return Photo(
         path=path,
-        size=size,
-        modified_ns=1,
-        device=1,
-        inode=hash(str(path)) & 0xFFFF,
+        size=info.st_size,
+        modified_ns=info.st_mtime_ns,
+        device=info.st_dev,
+        inode=info.st_ino,
         digest=digest,
         width=width,
         height=height,
@@ -174,6 +176,46 @@ class BurstSequenceTests(unittest.TestCase):
             self.assertEqual(len(sequences), 1)
             self.assertEqual(len(sequences[0].photos), 2)
             self.assertEqual(len({item.digest for item in sequences[0].photos}), 2)
+
+    def test_stale_replaced_frame_is_excluded_from_burst_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "a.jpg"
+            second = root / "b.jpg"
+            make_jpeg(first, "2026:09:19 01:00:00")
+            make_jpeg(second, "2026:09:19 01:00:01")
+            photos = (
+                photo(first, digest="a" * 64),
+                photo(second, digest="b" * 64),
+            )
+            result = ScanResult(photos=list(photos), groups=[Group("similar", photos)])
+
+            # The saved Photo describes the pre-change object. Appending bytes keeps
+            # the image parseable while guaranteeing a different filesystem size.
+            second.write_bytes(second.read_bytes() + b"stale-after-scan")
+
+            self.assertEqual(burst_sequences(result), ())
+
+    def test_reparse_ancestor_is_excluded_from_burst_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "a.jpg"
+            second = root / "b.jpg"
+            make_jpeg(first, "2026:09:19 01:00:00")
+            make_jpeg(second, "2026:09:19 01:00:01")
+            photos = (
+                photo(first, digest="a" * 64),
+                photo(second, digest="b" * 64),
+            )
+            result = ScanResult(photos=list(photos), groups=[Group("similar", photos)])
+
+            real_linked = __import__("photoclean.burst", fromlist=["linked"]).linked
+
+            def linked_with_unsafe_root(path):
+                return path == root or real_linked(path)
+
+            with patch("photoclean.burst.linked", side_effect=linked_with_unsafe_root):
+                self.assertEqual(burst_sequences(result), ())
 
     def test_invalid_arguments_are_rejected(self):
         with self.assertRaises(ValueError):
