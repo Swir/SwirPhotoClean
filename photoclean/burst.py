@@ -9,11 +9,13 @@ explicitly different devices are never merged into the same burst sequence.
 """
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .core import Group, Photo, ScanResult
+from .core import Group, Photo, ScanResult, linked, signature
 from .exif_metadata import read_exif_metadata
 from .quality import QualityKeeperRecommendation, recommend_keeper_with_quality
 
@@ -43,6 +45,16 @@ class BurstSequence:
         return max(0.0, (self.ended_at - self.started_at).total_seconds())
 
 
+def _capture_from_metadata(metadata) -> CaptureTime | None:
+    if metadata.captured_at is None or metadata.capture_source is None:
+        return None
+    return CaptureTime(
+        value=metadata.captured_at,
+        source=metadata.capture_source,
+        camera_label=metadata.device_label,
+    )
+
+
 def read_capture_time(path: Path) -> CaptureTime | None:
     """Read a capture timestamp from EXIF without decoding the full image.
 
@@ -56,13 +68,44 @@ def read_capture_time(path: Path) -> CaptureTime | None:
         metadata = read_exif_metadata(path)
     except (OSError, ValueError):
         return None
-    if metadata.captured_at is None or metadata.capture_source is None:
+    return _capture_from_metadata(metadata)
+
+
+def _scan_signature(photo: Photo) -> tuple[int, int, int, int]:
+    return photo.size, photo.modified_ns, photo.device, photo.inode
+
+
+def _stable_capture_time(photo: Photo) -> CaptureTime | None:
+    """Read EXIF only from the exact filesystem object represented by ``photo``.
+
+    Burst Cleaner runs after the scan, so a pathname may have been replaced in
+    the meantime. A replacement must not contribute EXIF evidence or influence a
+    Smart Keep suggestion. Bind Pillow to one already-open handle whose scanner
+    signature matches the saved ``Photo`` and recheck the pathname afterwards.
+    Any missing, changed, linked/reparse or unreadable entry is simply excluded
+    from burst review; cleanup safety remains independently revalidated later.
+    """
+
+    expected = _scan_signature(photo)
+    try:
+        if any(linked(part) for part in (photo.path, *photo.path.parents)):
+            return None
+        before = photo.path.stat()
+        if not stat.S_ISREG(before.st_mode) or signature(before) != expected:
+            return None
+
+        with photo.path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode) or signature(opened) != expected:
+                return None
+            metadata = read_exif_metadata(stream)
+
+        after = photo.path.stat()
+        if not stat.S_ISREG(after.st_mode) or signature(after) != expected:
+            return None
+    except (OSError, ValueError):
         return None
-    return CaptureTime(
-        value=metadata.captured_at,
-        source=metadata.capture_source,
-        camera_label=metadata.device_label,
-    )
+    return _capture_from_metadata(metadata)
 
 
 def _distinct_digest_photos(group: Group) -> tuple[Photo, ...]:
@@ -95,6 +138,7 @@ def burst_sequences(
     Requirements for a sequence:
     - source group must be ``similar``;
     - byte-identical copies are collapsed by digest;
+    - every included frame must still match its saved scan identity;
     - every included frame must have a parseable EXIF capture timestamp;
     - adjacent captures must be no more than ``max_gap_seconds`` apart;
     - when camera/device identity is available for both sides, it must agree.
@@ -118,7 +162,7 @@ def burst_sequences(
         timestamped: list[tuple[datetime, Photo, CaptureTime]] = []
         for photo in _distinct_digest_photos(group):
             if photo.path not in metadata_cache:
-                metadata_cache[photo.path] = read_capture_time(photo.path)
+                metadata_cache[photo.path] = _stable_capture_time(photo)
             evidence = metadata_cache[photo.path]
             if evidence is not None:
                 timestamped.append((evidence.value, photo, evidence))
