@@ -82,7 +82,7 @@ class DiagnosticsPersistedAttestationResumeTests(unittest.TestCase):
             ) as validator:
                 result = validate_resumed_release_attestation(check, report, attestation)
 
-            self.assertEqual(result, attestation.resolve())
+            self.assertEqual(result, attestation.absolute())
             validator.assert_called_once_with({})
 
     def test_cross_check_rejects_attestation_from_another_report(self):
