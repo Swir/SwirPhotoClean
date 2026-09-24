@@ -135,7 +135,7 @@ class EnhancedDiagnosticsWindow(DiagnosticsWindow):
             return
 
         try:
-            check = load_recycle_verification(Path(manifest).expanduser().resolve())
+            check = load_recycle_verification(_absolute_without_resolving(manifest))
             _require_runtime_safety_contract(check)
             report = None
             if check.stage == "restored-verified":
