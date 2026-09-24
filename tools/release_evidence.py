@@ -391,6 +391,7 @@ def _require_safe_release_evidence_input(path: Path):
 def _read_stable_release_evidence_payload(path: str | Path) -> object:
     """Read one bounded immutable snapshot of sanitized release evidence."""
     evidence = _absolute_without_resolving(path)
+    _require_safe_release_evidence_directory_ancestry(evidence.parent)
     before = _require_safe_release_evidence_input(evidence)
     before_identity = _release_evidence_input_identity(before)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
@@ -453,6 +454,7 @@ def _read_stable_release_evidence_payload(path: str | Path) -> object:
     finally:
         os.close(descriptor)
 
+    _require_safe_release_evidence_directory_ancestry(evidence.parent)
     final = _require_safe_release_evidence_input(evidence)
     if _release_evidence_input_identity(final) != before_identity:
         raise ReleaseEvidenceError("release evidence input path changed while being read")
