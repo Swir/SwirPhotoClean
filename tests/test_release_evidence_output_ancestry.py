@@ -100,16 +100,19 @@ class ReleaseEvidenceOutputAncestryTests(unittest.TestCase):
             )
             calls = 0
 
-            def fail_after_stage(directory, *, allow_missing=False):
+            def fail_after_stage_before_commit(directory, *, allow_missing=False):
                 nonlocal calls
                 calls += 1
-                if calls == 5:
+                # The fourth ancestry check occurs after the exclusive staging file
+                # has been written/validated but before os.replace commits it. A
+                # failure there must clean staging and leave the destination absent.
+                if calls == 4:
                     raise ReleaseEvidenceError("simulated late output ancestry redirect")
                 return original_check(directory, allow_missing=allow_missing)
 
             with patch(
                 "tools.release_evidence._require_safe_release_evidence_directory_ancestry",
-                side_effect=fail_after_stage,
+                side_effect=fail_after_stage_before_commit,
             ):
                 with self.assertRaisesRegex(ReleaseEvidenceError, "late output ancestry redirect"):
                     write_release_evidence(
