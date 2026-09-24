@@ -280,7 +280,50 @@ def _paths_alias(first: Path, second: Path) -> bool:
         return False
 
 
-def _attestation_output_identity(path: Path) -> tuple[int, int, int, int, int] | None:
+def _require_safe_attestation_directory_ancestry(
+    directory: Path,
+    *,
+    allow_missing: bool = False,
+) -> None:
+    """Reject redirected output ancestry before the packaged evidence writer runs."""
+    current = _absolute_without_resolving(directory)
+    chain: list[Path] = []
+    while True:
+        chain.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for entry in reversed(chain):
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
+            if allow_missing:
+                continue
+            raise PackagedAttestationError(
+                f"RELEASE_EVIDENCE.json output directory does not exist: {entry}"
+            )
+        except OSError as error:
+            raise PackagedAttestationError(
+                f"cannot safely inspect RELEASE_EVIDENCE.json output directory {entry}: {error}"
+            ) from error
+
+        if stat.S_ISLNK(info.st_mode) or bool(
+            getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+        ):
+            raise PackagedAttestationError(
+                "RELEASE_EVIDENCE.json output directory ancestry must not contain "
+                f"symlinks, junctions or reparse points: {entry}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise PackagedAttestationError(
+                "RELEASE_EVIDENCE.json output directory ancestry contains a "
+                f"non-directory entry: {entry}"
+            )
+
+
+def _attestation_output_identity(path: Path) -> tuple[int, int, int, int, int, int] | None:
     """Return output identity or fail closed for unsafe existing output entries."""
     try:
         info = path.lstat()
@@ -301,9 +344,14 @@ def _attestation_output_identity(path: Path) -> tuple[int, int, int, int, int] |
         raise PackagedAttestationError(
             "RELEASE_EVIDENCE.json output must be a regular file"
         )
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json output must not be hardlinked"
+        )
     return (
         int(info.st_dev),
         int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
         int(info.st_size),
         int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
         int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
@@ -331,9 +379,10 @@ def _validated_output_path(report_path: str | Path, output_path: str | Path) -> 
 def _write_validated_json_atomically(
     output: Path,
     payload: dict,
-    expected_output_identity: tuple[int, int, int, int, int] | None,
+    expected_output_identity: tuple[int, int, int, int, int, int] | None,
 ) -> None:
     """Validate staged bytes and output identity before one atomic replace."""
+    _require_safe_attestation_directory_ancestry(output.parent)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output.name}.",
         suffix=".tmp",
@@ -356,6 +405,7 @@ def _write_validated_json_atomically(
             raise PackagedAttestationError(
                 "staged release evidence differs from validated attestation"
             )
+        _require_safe_attestation_directory_ancestry(output.parent)
         if _attestation_output_identity(output) != expected_output_identity:
             raise PackagedAttestationError(
                 "RELEASE_EVIDENCE.json output changed while validated bytes were staged"
@@ -366,6 +416,8 @@ def _write_validated_json_atomically(
             raise PackagedAttestationError(
                 f"cannot atomically replace RELEASE_EVIDENCE.json output: {error}"
             ) from error
+        _require_safe_attestation_directory_ancestry(output.parent)
+        _attestation_output_identity(output)
     finally:
         try:
             temporary.unlink(missing_ok=True)
@@ -384,10 +436,18 @@ def write_packaged_attestation(
         confirm_manual_restore=confirm_manual_restore,
     )
     output = _validated_output_path(report_path, output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
+    _require_safe_attestation_directory_ancestry(output.parent, allow_missing=True)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise PackagedAttestationError(
+            f"cannot create RELEASE_EVIDENCE.json output directory: {error}"
+        ) from error
+    _require_safe_attestation_directory_ancestry(output.parent)
     expected_output_identity = _attestation_output_identity(output)
     _write_validated_json_atomically(output, payload, expected_output_identity)
 
+    _require_safe_attestation_directory_ancestry(output.parent)
     try:
         written = json.loads(output.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:

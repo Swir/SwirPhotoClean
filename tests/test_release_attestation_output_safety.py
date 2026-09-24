@@ -75,6 +75,27 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
             self.assertEqual(report.read_bytes(), before)
             self.assertEqual(alias.read_bytes(), before)
 
+    def test_attestation_writer_rejects_hardlinked_unrelated_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            unrelated = report.parent / "unrelated.json"
+            unrelated.write_text("keep", encoding="utf-8")
+            output = report.parent / ATTESTATION_NAME
+            try:
+                os.link(unrelated, output)
+            except OSError as error:
+                self.skipTest(f"hardlinks unavailable in test environment: {error}")
+
+            with self.assertRaisesRegex(PackagedAttestationError, "must not be hardlinked"):
+                write_packaged_attestation(
+                    report,
+                    output,
+                    confirm_manual_restore=True,
+                )
+
+            self.assertEqual(unrelated.read_text(encoding="utf-8"), "keep")
+            self.assertEqual(output.read_text(encoding="utf-8"), "keep")
+
     def test_attestation_writer_rejects_symlink_output(self):
         with tempfile.TemporaryDirectory() as folder:
             _verified, report = self._verified_packaged_report(folder)
@@ -94,6 +115,47 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
                 )
 
             self.assertEqual(destination.read_text(encoding="utf-8"), "keep")
+
+    def test_attestation_writer_rejects_redirected_parent_ancestry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            real_output = report.parent / "real-output"
+            real_output.mkdir()
+            redirected = report.parent / "redirected-output"
+            try:
+                redirected.symlink_to(real_output, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"directory symlinks unavailable in test environment: {error}")
+            output = redirected / ATTESTATION_NAME
+
+            with self.assertRaisesRegex(
+                PackagedAttestationError,
+                "directory ancestry.*symlinks|directory ancestry must not contain",
+            ):
+                write_packaged_attestation(
+                    report,
+                    output,
+                    confirm_manual_restore=True,
+                )
+
+            self.assertFalse((real_output / ATTESTATION_NAME).exists())
+
+    def test_attestation_writer_allows_safe_missing_nested_output_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            output = report.parent / "safe" / "nested" / ATTESTATION_NAME
+
+            written = write_packaged_attestation(
+                report,
+                output,
+                confirm_manual_restore=True,
+            )
+
+            self.assertEqual(written, output.resolve())
+            payload = validate_packaged_attestation(
+                json.loads(output.read_text(encoding="utf-8"))
+            )
+            self.assertTrue(payload["windows_packaged_runtime_confirmed"])
 
     def test_attestation_writer_does_not_reuse_predictable_tmp_path(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -123,7 +185,7 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
 
             with patch(
                 "photoclean.release_attestation._attestation_output_identity",
-                side_effect=[None, (1, 2, 3, 4, 5)],
+                side_effect=[None, (1, 2, 3, 4, 5, 6)],
             ):
                 with self.assertRaisesRegex(PackagedAttestationError, "changed while validated"):
                     write_packaged_attestation(

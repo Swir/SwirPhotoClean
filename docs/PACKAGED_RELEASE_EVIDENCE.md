@@ -67,6 +67,14 @@ A successful command prints `RELEASE_EVIDENCE_VALID=yes`. The file is written
 atomically and then re-read through the same strict validator before success is
 reported.
 
+The packaged writer also validates the destination itself. Existing
+`RELEASE_EVIDENCE.json` files must be ordinary single-link files, and the full
+lexical destination-directory ancestry must remain free of symlinks, Windows
+junctions and other reparse points before staging, before commit and after the
+atomic replace. Missing normal directories may be created, but their ancestry is
+revalidated immediately afterwards. This prevents the packaged handoff from
+silently writing through a redirected directory or a hardlinked destination.
+
 ## 3. What the packaged attestation validates
 
 The command fails closed unless all of these are true:
