@@ -295,7 +295,7 @@ def _require_safe_release_evidence_directory_ancestry(
     """Reject redirected lexical output ancestry before writing release evidence.
 
     The walk deliberately uses ``lstat`` without resolving the path so symlinks,
-    Windows junctions and other reparse points stay visible.  Missing descendants
+    Windows junctions and other reparse points stay visible. Missing descendants
     are allowed only during the pre-``mkdir`` check; every existing ancestor must
     already be an ordinary directory.
     """
@@ -336,7 +336,7 @@ def _require_safe_release_evidence_directory_ancestry(
 
 
 def _release_evidence_input_identity(info) -> tuple[int, int, int, int, int, int]:
-    """Normalize metadata used to bind a verified input path to one open handle."""
+    """Normalize metadata used to bind a verified path to one open handle."""
     return (
         int(info.st_dev),
         int(info.st_ino),
@@ -394,6 +394,8 @@ def _read_stable_release_evidence_payload(path: str | Path) -> object:
     before = _require_safe_release_evidence_input(evidence)
     before_identity = _release_evidence_input_identity(before)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(evidence, flags)
     except OSError as error:
@@ -489,14 +491,127 @@ def _release_evidence_output_identity(
         raise ReleaseEvidenceError("release evidence output must be a regular file")
     if int(getattr(info, "st_nlink", 1)) != 1:
         raise ReleaseEvidenceError("release evidence output must not be hardlinked")
-    return (
-        int(info.st_dev),
-        int(info.st_ino),
-        int(getattr(info, "st_nlink", 1)),
-        int(info.st_size),
-        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
-        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    if int(info.st_size) > _MAX_RELEASE_EVIDENCE_BYTES:
+        raise ReleaseEvidenceError(
+            f"release evidence output is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+        )
+    return _release_evidence_input_identity(info)
+
+
+def _read_bounded_release_evidence_handle(
+    descriptor: int,
+    *,
+    opened_identity: tuple[int, int, int, int, int, int],
+) -> bytes:
+    """Read bounded release evidence bytes through one already-open handle."""
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+    except OSError as error:
+        raise ReleaseEvidenceError(f"cannot seek release evidence handle safely: {error}") from error
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = _MAX_RELEASE_EVIDENCE_BYTES + 1 - total
+        if remaining <= 0:
+            raise ReleaseEvidenceError(
+                f"release evidence is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+            )
+        try:
+            chunk = os.read(descriptor, min(_READ_CHUNK_BYTES, remaining))
+        except OSError as error:
+            raise ReleaseEvidenceError(f"cannot read release evidence handle safely: {error}") from error
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > _MAX_RELEASE_EVIDENCE_BYTES:
+            raise ReleaseEvidenceError(
+                f"release evidence is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+            )
+
+    after = os.fstat(descriptor)
+    if _release_evidence_input_identity(after) != opened_identity:
+        raise ReleaseEvidenceError("release evidence changed while its open handle was being read")
+    raw = b"".join(chunks)
+    if len(raw) != opened_identity[3]:
+        raise ReleaseEvidenceError("release evidence size changed while its open handle was being read")
+    return raw
+
+
+def _validate_opened_release_evidence_handle(
+    descriptor: int,
+    *,
+    expected_path_identity: tuple[int, int, int, int, int, int] | None = None,
+) -> tuple[dict, tuple[int, int, int, int, int, int]]:
+    """Validate one regular, single-link release-evidence handle and its JSON."""
+    try:
+        opened = os.fstat(descriptor)
+    except OSError as error:
+        raise ReleaseEvidenceError(f"cannot inspect release evidence open handle: {error}") from error
+    if not stat.S_ISREG(opened.st_mode):
+        raise ReleaseEvidenceError("release evidence changed to a non-regular file while opening")
+    if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+        raise ReleaseEvidenceError("release evidence changed to a reparse point while opening")
+    if int(getattr(opened, "st_nlink", 1)) != 1:
+        raise ReleaseEvidenceError("release evidence became hardlinked while opening")
+    if int(opened.st_size) > _MAX_RELEASE_EVIDENCE_BYTES:
+        raise ReleaseEvidenceError(
+            f"release evidence is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+        )
+
+    opened_identity = _release_evidence_input_identity(opened)
+    if (
+        expected_path_identity is not None
+        and not _release_evidence_path_and_handle_identity_match(
+            expected_path_identity,
+            opened_identity,
+        )
+    ):
+        raise ReleaseEvidenceError("release evidence changed while it was being opened")
+
+    raw = _read_bounded_release_evidence_handle(
+        descriptor,
+        opened_identity=opened_identity,
     )
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReleaseEvidenceError(f"release evidence is not valid UTF-8 JSON: {error}") from error
+    return validate_release_evidence(payload), opened_identity
+
+
+def _read_stable_release_evidence_output(path: Path) -> dict:
+    """Verify the final output through one bounded identity-bound handle."""
+    _require_safe_release_evidence_directory_ancestry(path.parent)
+    before_identity = _release_evidence_output_identity(path)
+    if before_identity is None:
+        raise ReleaseEvidenceError("release evidence output disappeared before final verification")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ReleaseEvidenceError(f"cannot open final release evidence safely: {error}") from error
+    try:
+        payload, opened_identity = _validate_opened_release_evidence_handle(
+            descriptor,
+            expected_path_identity=before_identity,
+        )
+    finally:
+        os.close(descriptor)
+
+    _require_safe_release_evidence_directory_ancestry(path.parent)
+    final_identity = _release_evidence_output_identity(path)
+    if final_identity != before_identity:
+        raise ReleaseEvidenceError("release evidence output path changed during final verification")
+    if not _release_evidence_path_and_handle_identity_match(final_identity, opened_identity):
+        raise ReleaseEvidenceError(
+            "release evidence output path no longer refers to the verified file handle"
+        )
+    return payload
 
 
 def _write_validated_atomic_json(
@@ -504,9 +619,13 @@ def _write_validated_atomic_json(
     payload: dict,
     expected_output_identity: tuple[int, int, int, int, int, int] | None,
 ) -> None:
-    """Durably stage validated bytes beside the target before one atomic replace."""
+    """Validate staged bytes on their write handle before one guarded atomic replace."""
     raw = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    _require_safe_release_evidence_directory_ancestry(output.parent)
+    if len(raw) > _MAX_RELEASE_EVIDENCE_BYTES:
+        raise ReleaseEvidenceError(
+            f"staged release evidence is too large: maximum is {_MAX_RELEASE_EVIDENCE_BYTES} bytes"
+        )
+
     _require_safe_release_evidence_directory_ancestry(output.parent)
     try:
         descriptor, temporary_name = tempfile.mkstemp(
@@ -520,29 +639,46 @@ def _write_validated_atomic_json(
         ) from error
 
     temporary = Path(temporary_name)
+    staged_identity: tuple[int, int, int, int, int, int] | None = None
     try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
+        try:
+            offset = 0
+            while offset < len(raw):
+                try:
+                    written = os.write(descriptor, raw[offset:])
+                except OSError as error:
+                    raise ReleaseEvidenceError(
+                        f"cannot write staged release evidence safely: {error}"
+                    ) from error
+                if written <= 0:
+                    raise ReleaseEvidenceError("cannot write complete staged release evidence")
+                offset += written
+            try:
+                os.fsync(descriptor)
+            except OSError as error:
+                raise ReleaseEvidenceError(
+                    f"cannot flush staged release evidence safely: {error}"
+                ) from error
 
-        try:
-            staged_raw = temporary.read_bytes()
-        except OSError as error:
-            raise ReleaseEvidenceError(
-                f"cannot re-read staged release evidence: {error}"
-            ) from error
-        if staged_raw != raw:
-            raise ReleaseEvidenceError("staged release evidence bytes changed before commit")
-        try:
-            staged_payload = json.loads(staged_raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ReleaseEvidenceError(
-                "staged release evidence is not valid UTF-8 JSON"
-            ) from error
-        validate_release_evidence(staged_payload)
+            staged_payload, staged_identity = _validate_opened_release_evidence_handle(descriptor)
+            if staged_payload != payload:
+                raise ReleaseEvidenceError("staged release evidence differs from validated payload")
+        finally:
+            os.close(descriptor)
 
         _require_safe_release_evidence_directory_ancestry(output.parent)
+        temporary_identity = _release_evidence_output_identity(temporary)
+        if (
+            staged_identity is None
+            or temporary_identity is None
+            or not _release_evidence_path_and_handle_identity_match(
+                temporary_identity,
+                staged_identity,
+            )
+        ):
+            raise ReleaseEvidenceError(
+                "staged release evidence path changed after same-handle validation"
+            )
         if _release_evidence_output_identity(output) != expected_output_identity:
             raise ReleaseEvidenceError(
                 "release evidence output changed while validated bytes were staged"
@@ -553,6 +689,8 @@ def _write_validated_atomic_json(
             raise ReleaseEvidenceError(
                 f"cannot atomically replace release evidence output: {error}"
             ) from error
+        _require_safe_release_evidence_directory_ancestry(output.parent)
+        _release_evidence_output_identity(output)
     finally:
         try:
             temporary.unlink(missing_ok=True)
@@ -590,6 +728,10 @@ def write_release_evidence(
     _require_safe_release_evidence_directory_ancestry(output.parent)
     expected_output_identity = _release_evidence_output_identity(output)
     _write_validated_atomic_json(output, payload, expected_output_identity)
+
+    written = _read_stable_release_evidence_output(output)
+    if written != payload:
+        raise ReleaseEvidenceError("written release evidence differs from validated payload")
     return output.resolve()
 
 
