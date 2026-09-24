@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import os
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -10,6 +10,8 @@ from tkinter import filedialog, messagebox, ttk
 from . import i18n
 from .diagnostics import RecycleVerificationError, load_recycle_verification
 from .diagnostics_gui import DiagnosticsWindow, diag_tr
+from .evidence_io import hardened_read_json_object
+from .evidence_snapshot import _read_stable_report_bytes
 from .recycle_evidence import (
     REPORT_NAME,
     _require_runtime_safety_contract,
@@ -68,23 +70,32 @@ def category_label(category: str) -> str:
     return plus_tr(CATEGORY_LABELS.get(category, "Inny komunikat"))
 
 
-def validate_resumed_release_attestation(check, report_path, attestation_path) -> Path:
-    """Validate a persisted RELEASE_EVIDENCE file against the resumed session.
+def _absolute_without_resolving(path: str | Path) -> Path:
+    """Return an absolute path while preserving symlink/junction ancestry."""
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
 
-    The standalone attestation validator proves schema/current-contract integrity.
-    This additional cross-check binds the persisted file to the exact report and
-    generated fixture that the Diagnostics Center just resumed, so a valid file
-    from another qualified session can never be shown as this session's evidence.
+
+def validate_resumed_release_attestation(check, report_path, attestation_path) -> Path:
+    """Validate persisted RELEASE_EVIDENCE against the exact resumed report bytes.
+
+    Resume is release-critical too: never hash the report or parse the attestation
+    through ordinary path reads. Both inputs are consumed through the same bounded,
+    identity-bound readers used by release qualification so symlinks, hardlinks,
+    reparse ancestry and path swaps fail closed instead of being silently followed.
     """
 
-    report = Path(report_path).expanduser().resolve()
-    attestation = Path(attestation_path).expanduser().resolve()
+    report = _absolute_without_resolving(report_path)
+    attestation = _absolute_without_resolving(attestation_path)
     try:
-        report_bytes = report.read_bytes()
-        payload = json.loads(attestation.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        report_bytes = _read_stable_report_bytes(report)
+        payload = hardened_read_json_object(
+            attestation,
+            max_bytes=256 * 1024,
+            label="RELEASE_EVIDENCE.json",
+        )
+    except RecycleVerificationError as error:
         raise PackagedAttestationError(
-            f"cannot read persisted release evidence: {error}"
+            f"cannot safely read persisted release evidence: {error}"
         ) from error
 
     validated = validate_packaged_attestation(payload)
