@@ -49,6 +49,8 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/fixture_io.py",
     "photoclean/folder_health_app.py",
     "photoclean/folder_health_gui.py",
+    "photoclean/folder_health_hotspots_gui.py",
+    "photoclean/folder_hotspots.py",
     "photoclean/fullscreen_plus_gui.py",
     "photoclean/gui.py",
     "photoclean/i18n.py",
