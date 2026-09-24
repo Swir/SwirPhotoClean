@@ -10,7 +10,8 @@ import tkinter as tk
 
 from .compare_insights_gui import PhotoCleanApp as ReviewPhotoCleanApp
 from .diagnostics_plus_gui import EnhancedDiagnosticsWindow
-from .folder_health_gui import FolderHealthWindow, health_tr
+from .folder_health_gui import health_tr
+from .folder_health_hotspots_gui import FolderHealthHotspotsWindow as FolderHealthWindow
 from .modern_theme import install_modern_theme
 from .windows_ui import configure_process_dpi_awareness, install_windows_chrome_tracking
 
