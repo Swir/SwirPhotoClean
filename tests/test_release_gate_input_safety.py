@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from photoclean.safety_contract import source_safety_contract_sha256
+from tools import release_gate as release_gate_module
 from tools.release_gate import (
     _MAX_RUNTIME_EVIDENCE_BYTES,
     ReleaseGateError,
@@ -92,6 +93,53 @@ class ReleaseGateInputSafetyTests(unittest.TestCase):
                 "symlink, junction or reparse point",
             ):
                 _read_stable_runtime_evidence_payload(alias)
+
+    def test_symlinked_runtime_evidence_directory_ancestry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            real = root / "real-evidence"
+            real.mkdir()
+            evidence = real / "RELEASE_EVIDENCE.json"
+            write_valid_evidence(evidence)
+            alias = root / "redirected-evidence"
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"directory symlinks unavailable in test environment: {error}")
+
+            with self.assertRaisesRegex(
+                ReleaseGateError,
+                "directory ancestry must not contain symlinks|junctions|reparse points",
+            ):
+                _read_stable_runtime_evidence_payload(alias / "RELEASE_EVIDENCE.json")
+
+    def test_runtime_reader_rechecks_ancestry_after_handle_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            evidence = Path(folder) / "RELEASE_EVIDENCE.json"
+            write_valid_evidence(evidence)
+            original_check = (
+                release_gate_module._require_safe_runtime_evidence_directory_ancestry
+            )
+            calls = 0
+
+            def fail_after_snapshot(directory):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise ReleaseGateError("simulated runtime ancestry redirect")
+                return original_check(directory)
+
+            with patch(
+                "tools.release_gate._require_safe_runtime_evidence_directory_ancestry",
+                side_effect=fail_after_snapshot,
+            ):
+                with self.assertRaisesRegex(
+                    ReleaseGateError,
+                    "simulated runtime ancestry redirect",
+                ):
+                    _read_stable_runtime_evidence_payload(evidence)
+
+            self.assertEqual(calls, 2)
 
     def test_oversized_runtime_evidence_is_rejected_before_json_decode(self):
         with tempfile.TemporaryDirectory() as folder:
