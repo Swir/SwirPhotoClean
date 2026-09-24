@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .recycle_evidence import _absolute_without_resolving
 from .release_attestation import (
     ATTESTATION_NAME,
     PackagedAttestationError,
@@ -15,7 +16,10 @@ def _parse_attest_args(args: list[str]) -> tuple[Path, Path, bool]:
             "attest requires a recycle-evidence-report.json path"
         )
 
-    report = Path(args.pop(0)).expanduser().resolve()
+    # Keep lexical ancestry intact until the hardened evidence reader/writer can
+    # reject symlink/junction/reparse components. Path.resolve() here would erase
+    # the exact filesystem path supplied by the packaged Windows operator.
+    report = _absolute_without_resolving(args.pop(0))
     output: Path | None = None
     confirmed = False
 
@@ -33,7 +37,7 @@ def _parse_attest_args(args: list[str]) -> tuple[Path, Path, bool]:
                 raise PackagedAttestationError("--output may be supplied only once")
             if not args:
                 raise PackagedAttestationError("--output requires a file path")
-            output = Path(args.pop(0)).expanduser().resolve()
+            output = _absolute_without_resolving(args.pop(0))
             continue
         raise PackagedAttestationError(f"unknown attest option: {token}")
 

@@ -19,7 +19,9 @@ from .evidence_snapshot import load_validated_restore_evidence_snapshot
 
 
 def _safe_status(manifest: str | Path) -> int:
-    manifest_path = Path(manifest).expanduser().resolve()
+    # Preserve the caller's lexical ancestry until the hardened loader can inspect
+    # every component. Resolving here would hide a symlink/junction/reparse parent.
+    manifest_path = workflow._absolute_without_resolving(manifest)
     check = load_recycle_verification(manifest_path)
     workflow._require_runtime_safety_contract(check)
     inspection = inspect_recycle_evidence(check)

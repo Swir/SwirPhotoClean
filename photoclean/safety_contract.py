@@ -46,6 +46,7 @@ SAFETY_CONTRACT_FILES = (
     "photoclean/evidence_io.py",
     "photoclean/evidence_snapshot.py",
     "photoclean/exif_metadata.py",
+    "photoclean/fixture_io.py",
     "photoclean/folder_health_app.py",
     "photoclean/folder_health_gui.py",
     "photoclean/fullscreen_plus_gui.py",

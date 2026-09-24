@@ -8,9 +8,9 @@ against the live manifest and generated fixture, and returns those same bytes to
 the attestation layer for hashing and sanitization.
 
 The source report is itself release-critical input. Snapshot intake therefore
-fails closed on links/reparse points, hardlinks, non-regular files, oversized
-reports and identity/content metadata changes observed while one file handle is
-being read.
+fails closed on redirected directory ancestry, links/reparse points, hardlinks,
+non-regular files, oversized reports and identity/content metadata changes
+observed while one file handle is being read.
 """
 from __future__ import annotations
 
@@ -29,8 +29,39 @@ _READ_CHUNK_BYTES = 64 * 1024
 
 
 def _absolute_without_resolving(path: str | os.PathLike) -> Path:
-    """Return an absolute path while preserving the final filesystem entry."""
+    """Return an absolute path while preserving every lexical filesystem entry."""
     return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _require_safe_directory_ancestry(directory: Path) -> None:
+    """Reject symlink/junction/reparse components before release-evidence intake."""
+    current = _absolute_without_resolving(directory)
+    chain: list[Path] = []
+    while True:
+        chain.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for entry in reversed(chain):
+        try:
+            info = entry.lstat()
+        except OSError as error:
+            raise RecycleVerificationError(
+                f"Cannot safely inspect recycle evidence directory {entry}: {error}"
+            ) from error
+        if stat.S_ISLNK(info.st_mode) or bool(
+            getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+        ):
+            raise RecycleVerificationError(
+                "Recycle evidence directory ancestry must not contain symlinks, "
+                f"junctions or reparse points: {entry}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise RecycleVerificationError(
+                f"Recycle evidence directory ancestry contains a non-directory entry: {entry}"
+            )
 
 
 def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
@@ -53,8 +84,8 @@ def _path_and_handle_identity_match(
 
     CPython on Windows can expose different ``st_dev`` / creation-time details for
     a path stat versus an already-open CRT handle even when both refer to the same
-    file.  The file index (``st_ino``), link count, size and last-write timestamp
-    are the stable cross-API fields we require there.  Same-API comparisons before
+    file. The file index (``st_ino``), link count, size and last-write timestamp
+    are the stable cross-API fields we require there. Same-API comparisons before
     and after the read still use the complete identity tuple.
     """
     if os.name != "nt":
@@ -94,7 +125,8 @@ def _require_safe_report_entry(path: Path) -> os.stat_result:
 
 
 def _read_stable_report_bytes(report: Path) -> bytes:
-    """Read one bounded report handle and reject identity/metadata races."""
+    """Read one bounded report handle and reject ancestry/identity metadata races."""
+    _require_safe_directory_ancestry(report.parent)
     before = _require_safe_report_entry(report)
     before_identity = _file_identity(before)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
@@ -156,6 +188,7 @@ def _read_stable_report_bytes(report: Path) -> bytes:
     finally:
         os.close(descriptor)
 
+    _require_safe_directory_ancestry(report.parent)
     final = _require_safe_report_entry(report)
     if _file_identity(final) != before_identity:
         raise RecycleVerificationError(
@@ -185,7 +218,7 @@ def load_validated_restore_evidence_snapshot(
     """
     report = _absolute_without_resolving(report_path)
     manifest_path = (
-        Path(manifest).expanduser().resolve()
+        _absolute_without_resolving(manifest)
         if manifest is not None
         else report.parent / "recycle-verification.json"
     )
