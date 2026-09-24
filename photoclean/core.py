@@ -310,7 +310,13 @@ class BKTree:
             if distance <= radius:
                 yield node.photo
                 if node.collisions:
-                    yield from node.collisions
+                    for collision in node.collisions:
+                        # A large same-dHash collision bucket must remain cancellable.
+                        # Without this checkpoint one pathological flat/screenshot-heavy
+                        # bucket could monopolize the compare worker until all members
+                        # were yielded even after the user pressed Cancel.
+                        checkpoint(cancel)
+                        yield collision
             if node.children:
                 stack.extend(
                     child
@@ -325,8 +331,18 @@ def similar(a: Photo, b: Photo, threshold: int) -> bool:
         return False
     if (a.dhash ^ b.dhash).bit_count() > threshold:
         return False
-    error = sum((x - y) ** 2 for x, y in zip(a.color, b.color)) / len(a.color)
-    return error <= (14 + threshold * 2) ** 2
+
+    # Preserve the existing mean-squared-error threshold exactly, but stop once
+    # the accumulated error already exceeds the final possible acceptance bound.
+    # This matters for large BK-tree candidate sets containing obviously different
+    # colours while leaving exact matching semantics unchanged.
+    limit = (14 + threshold * 2) ** 2 * len(a.color)
+    error = 0
+    for left, right in zip(a.color, b.color):
+        error += (left - right) ** 2
+        if error > limit:
+            return False
+    return error <= limit
 
 
 def scan(roots, threshold=6, cancel=None, progress=None, include_similar=True, performance_profile="balanced"):
