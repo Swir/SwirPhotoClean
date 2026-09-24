@@ -30,6 +30,8 @@ ATTESTATION_NAME = "RELEASE_EVIDENCE.json"
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _REPARSE_POINT_ATTRIBUTE = 0x400
+_MAX_ATTESTATION_BYTES = 256 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 _REQUIRED_TRUE_FLAGS = (
     "physical_recycle_move_confirmed",
     "manual_restore_performed",
@@ -323,6 +325,32 @@ def _require_safe_attestation_directory_ancestry(
             )
 
 
+def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    """Return metadata that must stay stable for one attestation-file read."""
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _path_and_handle_identity_match(
+    path_identity: tuple[int, int, int, int, int, int],
+    handle_identity: tuple[int, int, int, int, int, int],
+) -> bool:
+    """Compare path/handle identity while tolerating Windows stat representation noise."""
+    if os.name != "nt":
+        return path_identity == handle_identity
+    path_inode = path_identity[1]
+    handle_inode = handle_identity[1]
+    if path_inode <= 0 or handle_inode <= 0 or path_inode != handle_inode:
+        return False
+    return path_identity[2:5] == handle_identity[2:5]
+
+
 def _attestation_output_identity(path: Path) -> tuple[int, int, int, int, int, int] | None:
     """Return output identity or fail closed for unsafe existing output entries."""
     try:
@@ -348,14 +376,144 @@ def _attestation_output_identity(path: Path) -> tuple[int, int, int, int, int, i
         raise PackagedAttestationError(
             "RELEASE_EVIDENCE.json output must not be hardlinked"
         )
-    return (
-        int(info.st_dev),
-        int(info.st_ino),
-        int(getattr(info, "st_nlink", 1)),
-        int(info.st_size),
-        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
-        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
-    )
+    if int(info.st_size) > _MAX_ATTESTATION_BYTES:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json is too large to validate safely"
+        )
+    return _file_identity(info)
+
+
+def _read_bounded_handle(
+    descriptor: int,
+    *,
+    opened_identity: tuple[int, int, int, int, int, int],
+) -> bytes:
+    """Read bounded bytes from one already-open attestation handle."""
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+    except OSError as error:
+        raise PackagedAttestationError(
+            f"cannot seek RELEASE_EVIDENCE.json handle safely: {error}"
+        ) from error
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = _MAX_ATTESTATION_BYTES + 1 - total
+        if remaining <= 0:
+            raise PackagedAttestationError(
+                "RELEASE_EVIDENCE.json is too large to validate safely"
+            )
+        try:
+            chunk = os.read(descriptor, min(_READ_CHUNK_BYTES, remaining))
+        except OSError as error:
+            raise PackagedAttestationError(
+                f"cannot read RELEASE_EVIDENCE.json handle safely: {error}"
+            ) from error
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > _MAX_ATTESTATION_BYTES:
+            raise PackagedAttestationError(
+                "RELEASE_EVIDENCE.json is too large to validate safely"
+            )
+
+    after = os.fstat(descriptor)
+    if _file_identity(after) != opened_identity:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json changed while its open handle was being read"
+        )
+    raw = b"".join(chunks)
+    if len(raw) != opened_identity[3]:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json size changed while its open handle was being read"
+        )
+    return raw
+
+
+def _validate_opened_attestation_handle(
+    descriptor: int,
+    *,
+    expected_path_identity: tuple[int, int, int, int, int, int] | None = None,
+) -> tuple[dict, tuple[int, int, int, int, int, int]]:
+    """Validate one open regular single-link attestation handle and return its payload."""
+    try:
+        opened = os.fstat(descriptor)
+    except OSError as error:
+        raise PackagedAttestationError(
+            f"cannot inspect RELEASE_EVIDENCE.json open handle: {error}"
+        ) from error
+    if not stat.S_ISREG(opened.st_mode):
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json changed to a non-regular file while opening"
+        )
+    if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json changed to a reparse point while opening"
+        )
+    if int(getattr(opened, "st_nlink", 1)) != 1:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json became hardlinked while opening"
+        )
+    if int(opened.st_size) > _MAX_ATTESTATION_BYTES:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json is too large to validate safely"
+        )
+    opened_identity = _file_identity(opened)
+    if (
+        expected_path_identity is not None
+        and not _path_and_handle_identity_match(expected_path_identity, opened_identity)
+    ):
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json changed while it was being opened"
+        )
+
+    raw = _read_bounded_handle(descriptor, opened_identity=opened_identity)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PackagedAttestationError(
+            f"cannot decode RELEASE_EVIDENCE.json safely: {error}"
+        ) from error
+    return validate_packaged_attestation(payload), opened_identity
+
+
+def _read_stable_attestation(path: Path) -> dict:
+    """Read final release evidence through one identity-bound, bounded file handle."""
+    _require_safe_attestation_directory_ancestry(path.parent)
+    before_identity = _attestation_output_identity(path)
+    if before_identity is None:
+        raise PackagedAttestationError("RELEASE_EVIDENCE.json output disappeared before verification")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise PackagedAttestationError(
+            f"cannot open RELEASE_EVIDENCE.json safely: {error}"
+        ) from error
+    try:
+        payload, opened_identity = _validate_opened_attestation_handle(
+            descriptor,
+            expected_path_identity=before_identity,
+        )
+    finally:
+        os.close(descriptor)
+
+    _require_safe_attestation_directory_ancestry(path.parent)
+    final_identity = _attestation_output_identity(path)
+    if final_identity != before_identity:
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json path changed while final bytes were being verified"
+        )
+    if not _path_and_handle_identity_match(final_identity, opened_identity):
+        raise PackagedAttestationError(
+            "RELEASE_EVIDENCE.json path no longer refers to the verified file handle"
+        )
+    return payload
 
 
 def _validated_output_path(report_path: str | Path, output_path: str | Path) -> Path:
@@ -381,7 +539,13 @@ def _write_validated_json_atomically(
     payload: dict,
     expected_output_identity: tuple[int, int, int, int, int, int] | None,
 ) -> None:
-    """Validate staged bytes and output identity before one atomic replace."""
+    """Validate staged bytes on one handle and guard the path before atomic replace."""
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if len(encoded) > _MAX_ATTESTATION_BYTES:
+        raise PackagedAttestationError(
+            "staged RELEASE_EVIDENCE.json is too large to validate safely"
+        )
+
     _require_safe_attestation_directory_ancestry(output.parent)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output.name}.",
@@ -389,23 +553,37 @@ def _write_validated_json_atomically(
         dir=output.parent,
     )
     temporary = Path(temporary_name)
+    staged_identity: tuple[int, int, int, int, int, int] | None = None
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-
         try:
-            staged = json.loads(temporary.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise PackagedAttestationError(
-                f"cannot re-read staged release evidence: {error}"
-            ) from error
-        if validate_packaged_attestation(staged) != payload:
-            raise PackagedAttestationError(
-                "staged release evidence differs from validated attestation"
-            )
+            offset = 0
+            while offset < len(encoded):
+                written = os.write(descriptor, encoded[offset:])
+                if written <= 0:
+                    raise PackagedAttestationError(
+                        "cannot write complete staged RELEASE_EVIDENCE.json"
+                    )
+                offset += written
+            os.fsync(descriptor)
+
+            staged, staged_identity = _validate_opened_attestation_handle(descriptor)
+            if staged != payload:
+                raise PackagedAttestationError(
+                    "staged release evidence differs from validated attestation"
+                )
+        finally:
+            os.close(descriptor)
+
         _require_safe_attestation_directory_ancestry(output.parent)
+        temporary_identity = _attestation_output_identity(temporary)
+        if (
+            staged_identity is None
+            or temporary_identity is None
+            or not _path_and_handle_identity_match(temporary_identity, staged_identity)
+        ):
+            raise PackagedAttestationError(
+                "staged RELEASE_EVIDENCE.json path changed after same-handle validation"
+            )
         if _attestation_output_identity(output) != expected_output_identity:
             raise PackagedAttestationError(
                 "RELEASE_EVIDENCE.json output changed while validated bytes were staged"
@@ -447,14 +625,8 @@ def write_packaged_attestation(
     expected_output_identity = _attestation_output_identity(output)
     _write_validated_json_atomically(output, payload, expected_output_identity)
 
-    _require_safe_attestation_directory_ancestry(output.parent)
-    try:
-        written = json.loads(output.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise PackagedAttestationError(
-            f"cannot re-read written release evidence: {error}"
-        ) from error
-    if validate_packaged_attestation(written) != payload:
+    written = _read_stable_attestation(output)
+    if written != payload:
         raise PackagedAttestationError(
             "written release evidence differs from validated attestation"
         )
