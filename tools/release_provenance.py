@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,9 @@ LEGACY_SCHEMA_VERSION = 1
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RELEASE_EVIDENCE = ROOT / "RELEASE_EVIDENCE.json"
 _CHUNK_SIZE = 1024 * 1024
+_MAX_PROVENANCE_MANIFEST_BYTES = 64 * 1024
+_MAX_RELEASE_EVIDENCE_BYTES = 64 * 1024
+_REPARSE_POINT_ATTRIBUTE = 0x400
 _GIT_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _SEMVER = re.compile(
@@ -25,12 +30,171 @@ class ProvenanceError(ValueError):
     """Release provenance is missing, malformed, or does not match the package."""
 
 
-def sha256_file(path: Path) -> str:
+def _absolute_without_resolving(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _input_identity(info) -> tuple[int, int, int, int, int, int]:
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(getattr(info, "st_nlink", 1)),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+        int(getattr(info, "st_ctime_ns", int(info.st_ctime * 1_000_000_000))),
+    )
+
+
+def _path_and_handle_identity_match(
+    path_identity: tuple[int, int, int, int, int, int],
+    handle_identity: tuple[int, int, int, int, int, int],
+) -> bool:
+    if os.name != "nt":
+        return path_identity == handle_identity
+
+    path_inode = path_identity[1]
+    handle_inode = handle_identity[1]
+    if path_inode <= 0 or handle_inode <= 0 or path_inode != handle_inode:
+        return False
+    return path_identity[2:5] == handle_identity[2:5]
+
+
+def _require_safe_input_ancestry(directory: Path, *, label: str) -> None:
+    """Reject symlink/junction/reparse ancestry without resolving it away."""
+    current = _absolute_without_resolving(directory)
+    chain: list[Path] = []
+    while True:
+        chain.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for entry in reversed(chain):
+        try:
+            info = entry.lstat()
+        except OSError as error:
+            raise ProvenanceError(
+                f"cannot safely inspect {label} directory {entry}: {error}"
+            ) from error
+        if stat.S_ISLNK(info.st_mode) or bool(
+            getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+        ):
+            raise ProvenanceError(
+                f"{label} directory ancestry must not contain symlinks, junctions or reparse points: {entry}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise ProvenanceError(
+                f"{label} directory ancestry contains a non-directory entry: {entry}"
+            )
+
+
+def _require_safe_regular_input(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int | None = None,
+):
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise ProvenanceError(f"cannot safely inspect {label} {path}: {error}") from error
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise ProvenanceError(f"{label} must not be a symlink, junction or reparse point")
+    if not stat.S_ISREG(info.st_mode):
+        raise ProvenanceError(f"{label} must be a regular file")
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise ProvenanceError(f"{label} must not be hardlinked")
+    if max_bytes is not None and int(info.st_size) > max_bytes:
+        raise ProvenanceError(f"{label} is too large: maximum is {max_bytes} bytes")
+    return info
+
+
+def _stable_input_snapshot(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int | None = None,
+    capture_bytes: bool = False,
+) -> tuple[int, str, bytes | None]:
+    """Read/hash one immutable regular-file snapshot through a bound handle."""
+    candidate = _absolute_without_resolving(path)
+    _require_safe_input_ancestry(candidate.parent, label=label)
+    before = _require_safe_regular_input(candidate, label=label, max_bytes=max_bytes)
+    before_identity = _input_identity(before)
+    expected_size = int(before.st_size)
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(candidate, flags)
+    except OSError as error:
+        raise ProvenanceError(f"cannot open {label} safely: {error}") from error
+
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(_CHUNK_SIZE), b""):
+    chunks: list[bytes] | None = [] if capture_bytes else None
+    total = 0
+    opened_identity: tuple[int, int, int, int, int, int] | None = None
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ProvenanceError(f"{label} changed to a non-regular file while opening")
+        if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+            raise ProvenanceError(f"{label} changed to a reparse point while opening")
+        if int(getattr(opened, "st_nlink", 1)) != 1:
+            raise ProvenanceError(f"{label} became hardlinked while opening")
+        if max_bytes is not None and int(opened.st_size) > max_bytes:
+            raise ProvenanceError(f"{label} is too large: maximum is {max_bytes} bytes")
+
+        opened_identity = _input_identity(opened)
+        if not _path_and_handle_identity_match(before_identity, opened_identity):
+            raise ProvenanceError(f"{label} changed while it was being opened")
+
+        while True:
+            remaining = expected_size + 1 - total
+            if remaining <= 0:
+                raise ProvenanceError(f"{label} grew while it was being read")
+            try:
+                chunk = os.read(descriptor, min(_CHUNK_SIZE, remaining))
+            except OSError as error:
+                raise ProvenanceError(f"cannot read {label} safely: {error}") from error
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > expected_size:
+                raise ProvenanceError(f"{label} grew while it was being read")
             digest.update(chunk)
-    return digest.hexdigest()
+            if chunks is not None:
+                chunks.append(chunk)
+
+        after = os.fstat(descriptor)
+        if _input_identity(after) != opened_identity:
+            raise ProvenanceError(f"{label} changed while it was being read")
+    finally:
+        os.close(descriptor)
+
+    if opened_identity is None:
+        raise ProvenanceError(f"{label} could not be bound to an open file handle")
+    _require_safe_input_ancestry(candidate.parent, label=label)
+    final = _require_safe_regular_input(candidate, label=label, max_bytes=max_bytes)
+    final_identity = _input_identity(final)
+    if final_identity != before_identity:
+        raise ProvenanceError(f"{label} path changed while it was being read")
+    if not _path_and_handle_identity_match(final_identity, opened_identity):
+        raise ProvenanceError(f"{label} path no longer refers to the verified file handle")
+    if total != expected_size:
+        raise ProvenanceError(f"{label} size changed while it was being read")
+
+    raw = b"".join(chunks) if chunks is not None else None
+    return expected_size, digest.hexdigest(), raw
+
+
+def sha256_file(path: Path) -> str:
+    _size, digest, _raw = _stable_input_snapshot(path, label="release input")
+    return digest
 
 
 def _normalize_commit(value: str) -> str:
@@ -77,22 +241,31 @@ def _current_safety_contract_sha256() -> str:
 
 
 def _release_evidence_metadata(path: Path) -> dict[str, Any]:
-    evidence = Path(path)
-    if not evidence.is_file():
-        raise ProvenanceError(f"release evidence does not exist: {evidence}")
+    evidence = _absolute_without_resolving(path)
+    size, digest, _raw = _stable_input_snapshot(
+        evidence,
+        label="release evidence",
+        max_bytes=_MAX_RELEASE_EVIDENCE_BYTES,
+    )
     return {
         "name": evidence.name,
-        "size": evidence.stat().st_size,
-        "sha256": sha256_file(evidence),
+        "size": size,
+        "sha256": digest,
     }
 
 
 def _resolve_release_evidence(path: Path | None) -> Path | None:
     if path is not None:
         return Path(path)
-    if DEFAULT_RELEASE_EVIDENCE.is_file():
-        return DEFAULT_RELEASE_EVIDENCE
-    return None
+    try:
+        DEFAULT_RELEASE_EVIDENCE.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ProvenanceError(
+            f"cannot safely inspect default release evidence: {error}"
+        ) from error
+    return DEFAULT_RELEASE_EVIDENCE
 
 
 def build_manifest(
@@ -105,8 +278,11 @@ def build_manifest(
     safety_contract_sha256: str | None = None,
     release_evidence: Path | None = None,
 ) -> dict[str, Any]:
-    if not archive.is_file():
-        raise ProvenanceError(f"release archive does not exist: {archive}")
+    archive_path = _absolute_without_resolving(archive)
+    archive_size, archive_digest, _raw = _stable_input_snapshot(
+        archive_path,
+        label="release archive",
+    )
 
     contract = (
         _validate_sha256(safety_contract_sha256, "safety contract SHA-256")
@@ -130,9 +306,9 @@ def build_manifest(
         "safety_contract_sha256": contract,
         "release_evidence": evidence,
         "artifact": {
-            "name": archive.name,
-            "size": archive.stat().st_size,
-            "sha256": sha256_file(archive),
+            "name": archive_path.name,
+            "size": archive_size,
+            "sha256": archive_digest,
         },
     }
 
@@ -167,8 +343,18 @@ def write_manifest(
 
 def load_manifest(path: Path) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        _size, _digest, raw = _stable_input_snapshot(
+            path,
+            label="provenance manifest",
+            max_bytes=_MAX_PROVENANCE_MANIFEST_BYTES,
+            capture_bytes=True,
+        )
+        if raw is None:
+            raise ProvenanceError("provenance manifest snapshot is unavailable")
+        payload = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError as error:
+        raise ProvenanceError(f"cannot read provenance manifest: invalid UTF-8: {error}") from error
+    except json.JSONDecodeError as error:
         raise ProvenanceError(f"cannot read provenance manifest: {error}") from error
     if not isinstance(payload, dict):
         raise ProvenanceError("provenance manifest root must be an object")
@@ -181,25 +367,27 @@ def _validate_artifact(manifest: dict[str, Any], archive: Path) -> None:
         raise ProvenanceError("manifest artifact section is missing")
     if set(artifact) != {"name", "size", "sha256"}:
         raise ProvenanceError("manifest artifact section contains missing or unsupported fields")
-    if not archive.is_file():
-        raise ProvenanceError(f"release archive does not exist: {archive}")
-    if artifact.get("name") != archive.name:
+
+    archive_path = _absolute_without_resolving(archive)
+    if artifact.get("name") != archive_path.name:
         raise ProvenanceError(
-            f"archive name mismatch: manifest={artifact.get('name')!r} actual={archive.name!r}"
+            f"archive name mismatch: manifest={artifact.get('name')!r} actual={archive_path.name!r}"
         )
     expected_size = artifact.get("size")
     if not isinstance(expected_size, int) or isinstance(expected_size, bool) or expected_size < 0:
         raise ProvenanceError("manifest artifact size is invalid")
-    actual_size = archive.stat().st_size
-    if expected_size != actual_size:
-        raise ProvenanceError(
-            f"archive size mismatch: manifest={expected_size} actual={actual_size}"
-        )
     expected_digest = _validate_sha256(
         artifact.get("sha256"),
         "manifest artifact SHA-256",
     )
-    actual_digest = sha256_file(archive)
+    actual_size, actual_digest, _raw = _stable_input_snapshot(
+        archive_path,
+        label="release archive",
+    )
+    if expected_size != actual_size:
+        raise ProvenanceError(
+            f"archive size mismatch: manifest={expected_size} actual={actual_size}"
+        )
     if expected_digest != actual_digest:
         raise ProvenanceError(
             f"archive SHA-256 mismatch: manifest={expected_digest} actual={actual_digest}"
@@ -233,19 +421,20 @@ def _validate_release_evidence_binding(
     if release_evidence is None:
         return
 
-    evidence = Path(release_evidence)
-    if not evidence.is_file():
-        raise ProvenanceError(f"release evidence does not exist: {evidence}")
+    evidence = _absolute_without_resolving(release_evidence)
     if name != evidence.name:
         raise ProvenanceError(
             f"release evidence name mismatch: manifest={name!r} actual={evidence.name!r}"
         )
-    actual_size = evidence.stat().st_size
+    actual_size, actual_digest, _raw = _stable_input_snapshot(
+        evidence,
+        label="release evidence",
+        max_bytes=_MAX_RELEASE_EVIDENCE_BYTES,
+    )
     if size != actual_size:
         raise ProvenanceError(
             f"release evidence size mismatch: manifest={size} actual={actual_size}"
         )
-    actual_digest = sha256_file(evidence)
     if digest != actual_digest:
         raise ProvenanceError(
             f"release evidence SHA-256 mismatch: manifest={digest} actual={actual_digest}"
