@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools import release_evidence as release_evidence_module
 from tools.release_evidence import (
     _MAX_RELEASE_EVIDENCE_BYTES,
     ReleaseEvidenceError,
@@ -45,6 +46,53 @@ class ReleaseEvidenceInputSafetyTests(unittest.TestCase):
                 "symlink, junction or reparse point",
             ):
                 read_release_evidence(alias)
+
+    def test_reader_rejects_symlinked_input_directory_ancestry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            real = root / "real-evidence"
+            real.mkdir()
+            evidence = real / "RELEASE_EVIDENCE.json"
+            evidence.write_text("{}\n", encoding="utf-8")
+            alias = root / "redirected-evidence"
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"directory symlinks unavailable in test environment: {error}")
+
+            with self.assertRaisesRegex(
+                ReleaseEvidenceError,
+                "directory ancestry must not contain symlinks|junctions|reparse points",
+            ):
+                read_release_evidence(alias / "RELEASE_EVIDENCE.json")
+
+    def test_reader_rechecks_directory_ancestry_after_handle_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            evidence = Path(folder) / "RELEASE_EVIDENCE.json"
+            evidence.write_text("{}\n", encoding="utf-8")
+            original_check = (
+                release_evidence_module._require_safe_release_evidence_directory_ancestry
+            )
+            calls = 0
+
+            def fail_after_snapshot(directory, *, allow_missing=False):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise ReleaseEvidenceError("simulated input ancestry redirect")
+                return original_check(directory, allow_missing=allow_missing)
+
+            with patch(
+                "tools.release_evidence._require_safe_release_evidence_directory_ancestry",
+                side_effect=fail_after_snapshot,
+            ):
+                with self.assertRaisesRegex(
+                    ReleaseEvidenceError,
+                    "simulated input ancestry redirect",
+                ):
+                    read_release_evidence(evidence)
+
+            self.assertEqual(calls, 2)
 
     def test_reader_rejects_oversized_input_before_json_parse(self):
         with tempfile.TemporaryDirectory() as folder:
