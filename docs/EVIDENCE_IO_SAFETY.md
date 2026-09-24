@@ -16,7 +16,11 @@ Limits are deliberately small for these machine-generated files: the local manif
 
 ## Write contract
 
-Release-evidence JSON is staged in the destination directory with an exclusive randomized temporary name. The staged bytes are flushed and `fsync`-ed, read back, parsed, and compared with the validated payload before an atomic `os.replace` commits them. Temporary files are removed on failure.
+Release-evidence JSON is staged in the destination directory with an exclusive randomized temporary name. The same descriptor returned by `mkstemp` now remains authoritative for the complete write, `fsync`, seek-back and bounded byte-for-byte verification. The writer no longer closes that handle and reopens the temporary pathname merely to validate staged bytes. This prevents a staging-path replacement from making the verified bytes describe a different filesystem object than the one originally created for the write.
+
+After descriptor verification, the staging pathname itself is inspected again before commit. It must still be a single-link regular file and must still identify the object verified through the original handle; a late path swap, hardlink, junction/reparse substitution or oversized staging object fails closed. Only then is the staged JSON parsed and compared with the validated payload and considered eligible for the atomic `os.replace`. Temporary files are removed on failure.
+
+The writer also enforces the same bounded machine-generated JSON limits during staging: manifest payloads are limited to 256 KiB and other evidence reports to 2 MiB. An oversized payload is rejected before a staging file is committed.
 
 An existing destination is accepted only when it is a single-link regular file. Symlinks, junctions/reparse points, hardlinked outputs, directories and other special filesystem entries fail closed. The destination identity is snapshotted before staging and checked again immediately before replacement, so a path created, removed or swapped while validated bytes are being prepared is rejected instead of silently overwritten.
 
@@ -34,6 +38,6 @@ The I/O layer changes only how local evidence JSON is consumed and committed. It
 
 ## Regression coverage
 
-`tests/test_evidence_io_safety.py` covers normal replacement of an existing report, hardlink rejection without modifying the generated original, final-entry/output-parent symlink rejection, destination identity races, late ancestry rechecks, manifest hardlinks, manifest redirected ancestry, a path swap between `lstat` and `open`, one-snapshot inspection/export consistency, deterministic runtime rebinding, and application-startup ordering.
+`tests/test_evidence_io_safety.py` covers normal replacement of an existing report, hardlink rejection without modifying the generated original, final-entry/output-parent symlink rejection, destination identity races, late ancestry rechecks, manifest hardlinks, manifest redirected ancestry, a path swap between `lstat` and `open`, one-snapshot inspection/export consistency, deterministic runtime rebinding, application-startup ordering, same-descriptor staging verification, late staging-path replacement and staging hardlink injection.
 
 `tests/test_release_evidence_output_ancestry.py` covers safe nested directory creation for the sanitized attestation, rejection of redirected directory ancestry, rejection of unrelated hardlinked output targets, and cleanup of the randomized staging file when a late ancestry recheck fails.
