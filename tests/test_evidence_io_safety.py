@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from photoclean import diagnostics
+from photoclean import evidence_io as evidence_io_module
 from photoclean.evidence_io import (
     hardened_atomic_write_json,
     hardened_export_recycle_evidence,
@@ -101,6 +102,84 @@ class EvidenceIOSafetyTests(unittest.TestCase):
 
             self.assertFalse((real_parent / "evidence.json").exists())
             self.assertEqual(list(real_parent.glob(".evidence.json.*.tmp")), [])
+
+    def test_staged_json_is_verified_through_original_descriptor(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "evidence.json"
+
+            with mock.patch.object(
+                Path,
+                "read_bytes",
+                side_effect=AssertionError("staging path must not be reopened for verification"),
+            ):
+                hardened_atomic_write_json(target, {"safe": True, "value": 7})
+
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(payload, {"safe": True, "value": 7})
+
+    def test_staging_path_swap_after_handle_verification_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            target = root / "evidence.json"
+            backup = root / "verified-staging-backup.tmp"
+            original_safe_input = evidence_io_module._safe_input_info
+            swapped = False
+
+            def swap_staging(path, *, max_bytes, label):
+                nonlocal swapped
+                source = Path(path)
+                if label == "Evidence staging file" and not swapped:
+                    swapped = True
+                    source.replace(backup)
+                    source.write_text('{"attacker": true}', encoding="utf-8")
+                return original_safe_input(source, max_bytes=max_bytes, label=label)
+
+            with mock.patch(
+                "photoclean.evidence_io._safe_input_info",
+                side_effect=swap_staging,
+            ):
+                with self.assertRaisesRegex(
+                    diagnostics.RecycleVerificationError,
+                    "staging file path changed before commit",
+                ):
+                    hardened_atomic_write_json(target, {"safe": True})
+
+            self.assertTrue(swapped)
+            self.assertFalse(target.exists())
+            self.assertTrue(backup.is_file())
+
+    def test_staging_hardlink_before_commit_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            target = root / "evidence.json"
+            alias = root / "staging-alias.json"
+            original_safe_input = evidence_io_module._safe_input_info
+            linked = False
+
+            def hardlink_staging(path, *, max_bytes, label):
+                nonlocal linked
+                source = Path(path)
+                if label == "Evidence staging file" and not linked:
+                    try:
+                        os.link(source, alias)
+                    except (OSError, NotImplementedError) as error:
+                        self.skipTest(f"hardlinks unavailable: {error}")
+                    linked = True
+                return original_safe_input(source, max_bytes=max_bytes, label=label)
+
+            with mock.patch(
+                "photoclean.evidence_io._safe_input_info",
+                side_effect=hardlink_staging,
+            ):
+                with self.assertRaisesRegex(
+                    diagnostics.RecycleVerificationError,
+                    "must not be hardlinked",
+                ):
+                    hardened_atomic_write_json(target, {"safe": True})
+
+            self.assertTrue(linked)
+            self.assertFalse(target.exists())
+            self.assertTrue(alias.is_file())
 
     def test_output_creation_during_staging_fails_closed(self):
         with tempfile.TemporaryDirectory() as folder:

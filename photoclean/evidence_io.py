@@ -384,16 +384,73 @@ def _safe_output_identity(path: Path) -> OutputIdentity | None:
     return _file_identity(info)
 
 
+def _write_descriptor_all(descriptor: int, raw: bytes) -> None:
+    """Write every staged byte without converting the descriptor back to a path."""
+    offset = 0
+    while offset < len(raw):
+        try:
+            written = os.write(descriptor, raw[offset:])
+        except OSError as error:
+            raise diagnostics.RecycleVerificationError(
+                f"Cannot write staged evidence JSON safely: {error}"
+            ) from error
+        if written <= 0:
+            raise diagnostics.RecycleVerificationError(
+                "Staged evidence JSON write made no forward progress"
+            )
+        offset += written
+
+
+def _read_descriptor_exact(descriptor: int, *, max_bytes: int) -> bytes:
+    """Re-read staged bytes through the same verified handle with a hard bound."""
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+    except OSError as error:
+        raise diagnostics.RecycleVerificationError(
+            f"Cannot seek staged evidence JSON safely: {error}"
+        ) from error
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = max_bytes + 1 - total
+        if remaining <= 0:
+            raise diagnostics.RecycleVerificationError(
+                "Staged evidence JSON is too large to validate safely"
+            )
+        try:
+            chunk = os.read(descriptor, min(_READ_CHUNK_BYTES, remaining))
+        except OSError as error:
+            raise diagnostics.RecycleVerificationError(
+                f"Cannot re-read staged evidence JSON safely: {error}"
+            ) from error
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            raise diagnostics.RecycleVerificationError(
+                "Staged evidence JSON is too large to validate safely"
+            )
+    return b"".join(chunks)
+
+
 def hardened_atomic_write_json(path: Path, payload: dict) -> None:
-    """Durably stage validated JSON beside ``path`` and atomically replace it."""
+    """Durably verify staged JSON on one handle, then atomically replace ``path``."""
     target = _absolute_without_resolving(path)
     normalized = dict(payload)
-    if normalized.get("version") == diagnostics.MANIFEST_VERSION:
+    is_manifest = normalized.get("version") == diagnostics.MANIFEST_VERSION
+    if is_manifest:
         normalized["manifest_fingerprint"] = diagnostics._payload_fingerprint(normalized)
 
     _require_safe_directory_ancestry(target.parent)
     expected_identity = _safe_output_identity(target)
     raw = json.dumps(normalized, ensure_ascii=False, indent=2).encode("utf-8")
+    output_limit = _MAX_MANIFEST_BYTES if is_manifest else _MAX_EVIDENCE_REPORT_BYTES
+    if len(raw) > output_limit:
+        raise diagnostics.RecycleVerificationError(
+            "Evidence JSON is too large to stage safely"
+        )
     expected_payload = json.loads(raw.decode("utf-8"))
 
     _require_safe_directory_ancestry(target.parent)
@@ -409,18 +466,62 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
         ) from error
 
     temporary = Path(temporary_name)
+    staged_identity: InputIdentity | None = None
     try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-
         try:
-            staged_raw = temporary.read_bytes()
-        except OSError as error:
-            raise diagnostics.RecycleVerificationError(
-                f"Cannot re-read staged evidence JSON: {error}"
-            ) from error
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle is not a regular file"
+                )
+            if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle unexpectedly became a reparse point"
+                )
+            if int(getattr(opened, "st_nlink", 1)) != 1:
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle must not be hardlinked"
+                )
+
+            _write_descriptor_all(descriptor, raw)
+            try:
+                os.fsync(descriptor)
+            except OSError as error:
+                raise diagnostics.RecycleVerificationError(
+                    f"Cannot flush staged evidence JSON safely: {error}"
+                ) from error
+
+            written = os.fstat(descriptor)
+            if not stat.S_ISREG(written.st_mode):
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle changed to a non-regular file"
+                )
+            if bool(getattr(written, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle changed to a reparse point"
+                )
+            if int(getattr(written, "st_nlink", 1)) != 1:
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle became hardlinked before verification"
+                )
+            staged_identity = _file_identity(written)
+            if int(written.st_size) != len(raw):
+                raise diagnostics.RecycleVerificationError(
+                    "Staged evidence JSON size does not match validated bytes"
+                )
+
+            staged_raw = _read_descriptor_exact(descriptor, max_bytes=output_limit)
+            after_read = os.fstat(descriptor)
+            if _file_identity(after_read) != staged_identity:
+                raise diagnostics.RecycleVerificationError(
+                    "Evidence staging handle changed while bytes were verified"
+                )
+        finally:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
         if staged_raw != raw:
             raise diagnostics.RecycleVerificationError(
                 "Staged evidence JSON bytes changed before commit"
@@ -437,6 +538,17 @@ def hardened_atomic_write_json(path: Path, payload: dict) -> None:
             )
 
         _require_safe_directory_ancestry(target.parent)
+        staged_path_info = _safe_input_info(
+            temporary,
+            max_bytes=output_limit,
+            label="Evidence staging file",
+        )
+        if staged_identity is None or not _path_and_handle_identity_match(
+            _file_identity(staged_path_info), staged_identity
+        ):
+            raise diagnostics.RecycleVerificationError(
+                "Evidence staging file path changed before commit"
+            )
         if _safe_output_identity(target) != expected_identity:
             raise diagnostics.RecycleVerificationError(
                 "Evidence output changed while validated bytes were staged"
