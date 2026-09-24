@@ -183,9 +183,23 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
             _verified, report = self._verified_packaged_report(folder)
             output = report.parent / ATTESTATION_NAME
 
+            from photoclean import release_attestation
+
+            real_identity = release_attestation._attestation_output_identity
+            output_checks = 0
+
+            def changed_output_identity(path):
+                nonlocal output_checks
+                if path == output:
+                    output_checks += 1
+                    if output_checks == 1:
+                        return None
+                    return (1, 2, 1, 4, 5, 6)
+                return real_identity(path)
+
             with patch(
                 "photoclean.release_attestation._attestation_output_identity",
-                side_effect=[None, (1, 2, 3, 4, 5, 6)],
+                side_effect=changed_output_identity,
             ):
                 with self.assertRaisesRegex(PackagedAttestationError, "changed while validated"):
                     write_packaged_attestation(
@@ -194,6 +208,7 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
                         confirm_manual_restore=True,
                     )
 
+            self.assertGreaterEqual(output_checks, 2)
             self.assertFalse(output.exists())
             self.assertEqual(list(report.parent.glob(".RELEASE_EVIDENCE.json.*.tmp")), [])
 
@@ -207,6 +222,100 @@ class ReleaseAttestationOutputSafetyTests(unittest.TestCase):
                 side_effect=OSError("simulated replace failure"),
             ):
                 with self.assertRaisesRegex(PackagedAttestationError, "atomically replace"):
+                    write_packaged_attestation(
+                        report,
+                        output,
+                        confirm_manual_restore=True,
+                    )
+
+            self.assertFalse(output.exists())
+            self.assertEqual(list(report.parent.glob(".RELEASE_EVIDENCE.json.*.tmp")), [])
+
+    def test_attestation_writer_does_not_reopen_staged_or_final_json_by_path(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            output = report.parent / ATTESTATION_NAME
+            original_read_text = Path.read_text
+
+            def guarded_read_text(path, *args, **kwargs):
+                name = path.name
+                if name == ATTESTATION_NAME or (
+                    name.startswith(f".{ATTESTATION_NAME}.") and name.endswith(".tmp")
+                ):
+                    raise AssertionError("release attestation must use stable handles")
+                return original_read_text(path, *args, **kwargs)
+
+            with patch.object(Path, "read_text", guarded_read_text):
+                written = write_packaged_attestation(
+                    report,
+                    output,
+                    confirm_manual_restore=True,
+                )
+
+            self.assertEqual(written, output.resolve())
+            self.assertTrue(output.is_file())
+
+    def test_attestation_writer_detects_final_path_swap_during_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            output = report.parent / ATTESTATION_NAME
+            replacement = report.parent / "replacement-release-evidence.json"
+            real_open = os.open
+            swapped = False
+
+            def swapping_open(path, flags, mode=0o777, *, dir_fd=None):
+                nonlocal swapped
+                candidate = Path(path)
+                if not swapped and candidate == output and output.exists():
+                    replacement.write_bytes(output.read_bytes())
+                    os.replace(replacement, output)
+                    swapped = True
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with patch("photoclean.release_attestation.os.open", side_effect=swapping_open):
+                with self.assertRaisesRegex(PackagedAttestationError, "changed while it was being opened"):
+                    write_packaged_attestation(
+                        report,
+                        output,
+                        confirm_manual_restore=True,
+                    )
+
+            self.assertTrue(swapped)
+            self.assertTrue(output.is_file())
+
+    def test_attestation_writer_detects_staged_path_identity_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            output = report.parent / ATTESTATION_NAME
+
+            from photoclean import release_attestation
+
+            real_identity = release_attestation._attestation_output_identity
+
+            def changed_identity(path):
+                identity = real_identity(path)
+                if (
+                    identity is not None
+                    and path.name.startswith(f".{ATTESTATION_NAME}.")
+                    and path.name.endswith(".tmp")
+                ):
+                    return (
+                        identity[0],
+                        identity[1] + 1,
+                        identity[2],
+                        identity[3],
+                        identity[4],
+                        identity[5],
+                    )
+                return identity
+
+            with patch(
+                "photoclean.release_attestation._attestation_output_identity",
+                side_effect=changed_identity,
+            ):
+                with self.assertRaisesRegex(PackagedAttestationError, "staged.*path changed"):
                     write_packaged_attestation(
                         report,
                         output,

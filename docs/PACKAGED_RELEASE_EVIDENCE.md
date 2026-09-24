@@ -75,6 +75,14 @@ atomic replace. Missing normal directories may be created, but their ancestry is
 revalidated immediately afterwards. This prevents the packaged handoff from
 silently writing through a redirected directory or a hardlinked destination.
 
+The staged JSON is validated from the same open file descriptor that received
+the bytes, then its pathname identity is checked immediately before the atomic
+replace. The final `RELEASE_EVIDENCE.json` is verified with a bounded,
+single-handle read whose path identity must remain stable before, during and
+after the read. Path swaps, hardlinks, redirected ancestry and reparse points
+therefore fail closed instead of allowing a different file to satisfy the final
+handoff check.
+
 ## 3. What the packaged attestation validates
 
 The command fails closed unless all of these are true:
