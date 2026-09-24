@@ -156,6 +156,43 @@ def _runtime_path_and_handle_identity_match(
     return path_identity[2:5] == handle_identity[2:5]
 
 
+def _require_safe_runtime_evidence_directory_ancestry(directory: Path) -> None:
+    """Reject redirected lexical ancestry around RELEASE_EVIDENCE.json.
+
+    The release gate intentionally inspects the path as supplied instead of resolving
+    it first. Every existing parent must therefore remain an ordinary directory both
+    before and after the bounded handle read; symlinks, junctions and other reparse
+    points fail closed rather than redirecting the publication gate to another file.
+    """
+    current = Path(os.path.abspath(os.fspath(directory.expanduser())))
+    chain: list[Path] = []
+    while True:
+        chain.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for entry in reversed(chain):
+        try:
+            info = entry.lstat()
+        except OSError as error:
+            raise ReleaseGateError(
+                f"cannot safely inspect runtime evidence directory {entry}: {error}"
+            ) from error
+        if stat.S_ISLNK(info.st_mode) or bool(
+            getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+        ):
+            raise ReleaseGateError(
+                "runtime evidence directory ancestry must not contain symlinks, "
+                f"junctions or reparse points: {entry}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise ReleaseGateError(
+                f"runtime evidence directory ancestry contains a non-directory entry: {entry}"
+            )
+
+
 def _require_safe_runtime_evidence_entry(path: Path):
     """Reject aliases and ambiguous filesystem objects before release authorization."""
     try:
@@ -186,14 +223,18 @@ def _read_stable_runtime_evidence_payload(path: Path) -> object:
     """Read one bounded immutable snapshot of RELEASE_EVIDENCE.json.
 
     The publication gate must validate the exact bytes captured from the verified
-    regular-file handle. A path swap, hardlink, reparse point, oversized input or
-    metadata mutation therefore fails closed instead of authorizing a release from
-    a different filesystem object than the one inspected before opening.
+    regular-file handle. A path swap, hardlink, reparse point, redirected parent,
+    oversized input or metadata mutation therefore fails closed instead of
+    authorizing a release from a different filesystem object than the one inspected
+    before opening.
     """
     evidence = Path(os.path.abspath(os.fspath(path.expanduser())))
+    _require_safe_runtime_evidence_directory_ancestry(evidence.parent)
     before = _require_safe_runtime_evidence_entry(evidence)
     before_identity = _runtime_evidence_identity(before)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(evidence, flags)
     except OSError as error:
@@ -250,6 +291,7 @@ def _read_stable_runtime_evidence_payload(path: Path) -> object:
     finally:
         os.close(descriptor)
 
+    _require_safe_runtime_evidence_directory_ancestry(evidence.parent)
     final = _require_safe_runtime_evidence_entry(evidence)
     if _runtime_evidence_identity(final) != before_identity:
         raise ReleaseGateError("runtime evidence input path changed while being read")
