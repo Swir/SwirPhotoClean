@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +60,12 @@ def _path_and_handle_identity_match(
     return path_identity[2:5] == handle_identity[2:5]
 
 
-def _require_safe_input_ancestry(directory: Path, *, label: str) -> None:
+def _require_safe_input_ancestry(
+    directory: Path,
+    *,
+    label: str,
+    allow_missing: bool = False,
+) -> None:
     """Reject symlink/junction/reparse ancestry without resolving it away."""
     current = _absolute_without_resolving(directory)
     chain: list[Path] = []
@@ -73,6 +79,10 @@ def _require_safe_input_ancestry(directory: Path, *, label: str) -> None:
     for entry in reversed(chain):
         try:
             info = entry.lstat()
+        except FileNotFoundError:
+            if allow_missing:
+                continue
+            raise ProvenanceError(f"{label} directory does not exist: {entry}")
         except OSError as error:
             raise ProvenanceError(
                 f"cannot safely inspect {label} directory {entry}: {error}"
@@ -313,6 +323,165 @@ def build_manifest(
     }
 
 
+def _provenance_output_identity(path: Path) -> tuple[int, int, int, int, int, int] | None:
+    """Return a safe existing output identity or fail closed for aliases."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ProvenanceError(
+            f"cannot safely inspect provenance output path {path}: {error}"
+        ) from error
+    if stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE
+    ):
+        raise ProvenanceError(
+            "provenance output must not be a symlink, junction or reparse point"
+        )
+    if not stat.S_ISREG(info.st_mode):
+        raise ProvenanceError("provenance output must be a regular file")
+    if int(getattr(info, "st_nlink", 1)) != 1:
+        raise ProvenanceError("provenance output must not be hardlinked")
+    if int(info.st_size) > _MAX_PROVENANCE_MANIFEST_BYTES:
+        raise ProvenanceError(
+            "provenance output is too large: "
+            f"maximum is {_MAX_PROVENANCE_MANIFEST_BYTES} bytes"
+        )
+    return _input_identity(info)
+
+
+def _write_manifest_atomically(output: Path, raw: bytes) -> None:
+    """Stage, fsync, same-handle verify and atomically replace one manifest."""
+    if len(raw) > _MAX_PROVENANCE_MANIFEST_BYTES:
+        raise ProvenanceError(
+            "provenance manifest is too large: "
+            f"maximum is {_MAX_PROVENANCE_MANIFEST_BYTES} bytes"
+        )
+
+    candidate = _absolute_without_resolving(output)
+    _require_safe_input_ancestry(
+        candidate.parent,
+        label="provenance output",
+        allow_missing=True,
+    )
+    try:
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ProvenanceError(f"cannot create provenance output directory: {error}") from error
+    _require_safe_input_ancestry(candidate.parent, label="provenance output")
+    expected_output_identity = _provenance_output_identity(candidate)
+
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{candidate.name}.",
+            suffix=".tmp",
+            dir=candidate.parent,
+        )
+    except OSError as error:
+        raise ProvenanceError(f"cannot create provenance staging file: {error}") from error
+
+    temporary = Path(temporary_name)
+    staged_identity: tuple[int, int, int, int, int, int] | None = None
+    try:
+        try:
+            offset = 0
+            while offset < len(raw):
+                try:
+                    written = os.write(descriptor, raw[offset:])
+                except OSError as error:
+                    raise ProvenanceError(
+                        f"cannot write staged provenance safely: {error}"
+                    ) from error
+                if written <= 0:
+                    raise ProvenanceError("cannot write complete staged provenance")
+                offset += written
+            try:
+                os.fsync(descriptor)
+            except OSError as error:
+                raise ProvenanceError(
+                    f"cannot flush staged provenance safely: {error}"
+                ) from error
+
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise ProvenanceError("staged provenance changed to a non-regular file")
+            if bool(getattr(opened, "st_file_attributes", 0) & _REPARSE_POINT_ATTRIBUTE):
+                raise ProvenanceError("staged provenance changed to a reparse point")
+            if int(getattr(opened, "st_nlink", 1)) != 1:
+                raise ProvenanceError("staged provenance became hardlinked")
+            if int(opened.st_size) != len(raw):
+                raise ProvenanceError("staged provenance size differs from serialized manifest")
+            staged_identity = _input_identity(opened)
+
+            try:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+            except OSError as error:
+                raise ProvenanceError(
+                    f"cannot seek staged provenance safely: {error}"
+                ) from error
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                remaining = len(raw) + 1 - total
+                if remaining <= 0:
+                    raise ProvenanceError("staged provenance grew during verification")
+                try:
+                    chunk = os.read(descriptor, min(_CHUNK_SIZE, remaining))
+                except OSError as error:
+                    raise ProvenanceError(
+                        f"cannot read staged provenance safely: {error}"
+                    ) from error
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > len(raw):
+                    raise ProvenanceError("staged provenance grew during verification")
+            if b"".join(chunks) != raw:
+                raise ProvenanceError("staged provenance differs from serialized manifest")
+            after_read = os.fstat(descriptor)
+            if _input_identity(after_read) != staged_identity:
+                raise ProvenanceError("staged provenance changed during same-handle verification")
+        finally:
+            os.close(descriptor)
+
+        _require_safe_input_ancestry(candidate.parent, label="provenance output")
+        staged_path_identity = _provenance_output_identity(temporary)
+        if (
+            staged_identity is None
+            or staged_path_identity is None
+            or not _path_and_handle_identity_match(staged_path_identity, staged_identity)
+        ):
+            raise ProvenanceError(
+                "staged provenance path changed after same-handle verification"
+            )
+        if _provenance_output_identity(candidate) != expected_output_identity:
+            raise ProvenanceError(
+                "provenance output changed while validated bytes were staged"
+            )
+        try:
+            os.replace(temporary, candidate)
+        except OSError as error:
+            raise ProvenanceError(
+                f"cannot atomically replace provenance output: {error}"
+            ) from error
+
+        _size, _digest, written = _stable_input_snapshot(
+            candidate,
+            label="provenance manifest",
+            max_bytes=_MAX_PROVENANCE_MANIFEST_BYTES,
+            capture_bytes=True,
+        )
+        if written != raw:
+            raise ProvenanceError("written provenance differs from validated serialized manifest")
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def write_manifest(
     output: Path,
     archive: Path,
@@ -333,11 +502,8 @@ def write_manifest(
         safety_contract_sha256=safety_contract_sha256,
         release_evidence=release_evidence,
     )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    raw = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    _write_manifest_atomically(output, raw)
     return manifest
 
 
