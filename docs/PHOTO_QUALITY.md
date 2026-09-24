@@ -25,13 +25,15 @@ Resolution remains important, but a clearly soft or strongly clipped frame can l
 
 For very large groups, detailed quality analysis is bounded to the strongest structural candidates so the review path stays responsive. Large individual photos are also reduced to the requested analysis bound before EXIF orientation and grayscale scoring allocate additional pixel buffers; JPEG decoders are asked to downsample early when supported.
 
-## Scan-identity guard
+## Stable-handle scan-identity guard
 
-A cached quality result is only a review aid for the exact scan record that produced it. Before and after each quality access, SWIR PhotoClean rechecks the file's scan-time size, modification timestamp and available filesystem identity and rejects symlink/reparse replacements. If a reviewed file disappears or changes after the scan, its quality evidence becomes unavailable instead of silently serving a stale cached recommendation.
+A quality result is only a review aid for the exact scan record that produced it. Before opening the image, SWIR PhotoClean checks the lexical file path and its parent chain and rejects symlink, junction or other reparse-point ancestry instead of resolving through it.
 
-Only successful analyses enter the quality cache. A temporary sharing violation, decoder/read error or similar transient failure is reported as unavailable for that attempt but is retried on the next review request instead of poisoning the session with a sticky negative cache entry.
+The image is then opened once. The authoritative descriptor is matched against the scan-time size, modification timestamp and available device/inode identity and against the object observed immediately before the open. Pillow decodes from a duplicate of that already-bound descriptor rather than reopening the pathname. After analysis, the authoritative descriptor, pathname and path ancestry are checked again before a successful score may be returned.
 
-This guard is deliberately cheaper than the destructive-path validation. It does **not** replace the full SHA-256 revalidation performed before any Recycle Bin operation.
+Successful stable analyses may be cached for responsiveness, but a cache entry is consulted only after the current pathname has been rebound to a matching open descriptor. Missing, replaced, redirected or newly unsafe paths therefore cannot receive an old cached score. Read/decode failures are never cached, so a temporary sharing violation or decoder error can be retried on the next review request.
+
+This guard is deliberately cheaper than the destructive-path validation. It does **not** prove byte identity and does **not** replace the full SHA-256 revalidation performed before any Recycle Bin operation.
 
 ## Important limitations
 
