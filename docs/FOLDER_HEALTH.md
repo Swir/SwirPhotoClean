@@ -16,6 +16,23 @@ The center summarizes the current `ScanResult` without rescanning files:
 
 The largest-files table is informational. A large file is not treated as a bad photo and is never selected automatically.
 
+## Exact-duplicate folder hotspots
+
+Folder Health now includes a **Duplicate hotspots… / Hotspoty duplikatów…** drill-down. Open it from the Folder Health footer or press `Ctrl+Shift+H` while Folder Health is active.
+
+The hotspot table ranks folders by bytes represented by redundant **exact SHA-256 copies** and shows:
+
+- folder path;
+- number of exact digest groups contributing redundant copies;
+- number of additional byte-identical copies in that folder;
+- conservative potential savings represented by those additional copies.
+
+This view is intentionally read-only. It does not create cleanup marks, move files, or turn similar-photo matches into deletion candidates. Similar groups are excluded completely.
+
+For every exact digest, the calculation first reserves one keeper. The keeper simulation is deterministic and conservative: it keeps the largest member, then uses a case-insensitive path tie-break when sizes are equal. Only the remaining exact copies are attributed to folders. Repeated/overlapping group records are deduplicated against the authoritative `ScanResult.photos`, so stale or injected members cannot inflate the ranking.
+
+Double-click a hotspot row, press `Ctrl+C`, or use **Copy folder path** to copy the selected folder path for navigation. Copying the path has no effect on review selections or cleanup state.
+
 ## Conservative savings model
 
 **Exact savings are based only on SHA-256 exact-duplicate evidence already produced by the scanner.** Similar-photo groups never contribute to the savings number.
@@ -41,3 +58,5 @@ Actual cleanup remains in the normal review workflow. Before any selected file c
 The center is available in Polish and English. It renders a bounded largest-files list and caps the notice text shown in the window, while the underlying scan result remains unchanged. Refreshing the center recalculates only in-memory summary data and never starts another disk scan.
 
 The largest-files selection uses a bounded top-K heap instead of sorting the complete photo list. Exact groups are streamed from `ScanResult.groups` into the conservative digest buckets without first creating separate exact/similar group lists, and grouped-file counts avoid an additional full union set. These changes preserve the existing ordering and safety semantics while reducing transient CPU/memory overhead on large scans.
+
+The hotspot view is also bounded: the UI renders at most the highest-impact folders while keeping the calculation read-only and deterministic. It reuses already-scanned exact-digest evidence and performs no additional image decoding or filesystem traversal.
