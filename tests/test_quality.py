@@ -174,6 +174,58 @@ class PhotoQualityTests(unittest.TestCase):
             self.assertFalse(changed.available)
             self.assertIn("changed", changed.error)
 
+    def test_reparse_ancestor_is_rejected_before_quality_decode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "frame.png"
+            checkerboard().save(path)
+            photo = as_photo(path, digest="5" * 64)
+            from photoclean import quality as quality_module
+
+            real_linked = quality_module.linked
+
+            def linked_with_unsafe_root(candidate):
+                return Path(candidate) == root or real_linked(Path(candidate))
+
+            with patch(
+                "photoclean.quality.linked",
+                side_effect=linked_with_unsafe_root,
+            ), patch(
+                "photoclean.quality.Image.open",
+                side_effect=AssertionError("unsafe ancestry must be rejected before decode"),
+            ):
+                result = assess_photo(photo)
+
+            self.assertFalse(result.available)
+            self.assertIn("unsafe", result.error.lower())
+
+    def test_redirected_open_handle_is_rejected_before_quality_decode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "frame.png"
+            replacement = root / "replacement.png"
+            checkerboard().save(path)
+            Image.new("RGB", (37, 29), "navy").save(replacement)
+            photo = as_photo(path, digest="6" * 64)
+
+            path_type = type(path)
+            real_open = path_type.open
+
+            def redirected_open(candidate, *args, **kwargs):
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if candidate == path and mode == "rb":
+                    return real_open(replacement, *args, **kwargs)
+                return real_open(candidate, *args, **kwargs)
+
+            with patch.object(path_type, "open", new=redirected_open), patch(
+                "photoclean.quality.Image.open",
+                side_effect=AssertionError("redirected handle must be rejected before decode"),
+            ):
+                result = assess_photo(photo)
+
+            self.assertFalse(result.available)
+            self.assertIn("redirected", result.error.lower())
+
     def test_large_quality_source_is_bounded_before_orientation_and_grayscale(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "large.png"
