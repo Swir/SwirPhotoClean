@@ -130,6 +130,8 @@ def _read_stable_report_bytes(report: Path) -> bytes:
     before = _require_safe_report_entry(report)
     before_identity = _file_identity(before)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(report, flags)
     except OSError as error:
