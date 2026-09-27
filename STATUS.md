@@ -52,7 +52,7 @@ Rozwój po publicznym wydaniu **v0.3.0 prerelease** w kierunku stabilnego 1.0. `
 - [x] Potwierdzenie odmowy trwałego usuwania przy niedostępnym koszu: Windows nie potwierdził operacji kosza, aplikacja ją przerwała, a oba wygenerowane pliki pozostały na miejscu.
 - [x] Test pracy na 500 wygenerowanych obrazach oraz anulowania w trakcie porównywania; przed 1.0 warto rozszerzyć próbę na wolniejszy dysk i większe fotografie.
 - [x] Testy orientacji EXIF, limitu dużych obrazów i błędów dostępu.
-- [x] Paczka portable z instrukcją i potwierdzonym zakresem obsługiwanych formatów; najnowszy artefakt CI ma skrót SHA-256 `2762fc4a3b0e551f67f421694d71e0702e1f660cad3abcefd86b8cd531087240` i wygasa 2026-12-08. Lokalna paczka do testu ma SHA-256 `38ce4542e0dd018d4969df4da0c36c7a1f2ff927b6ad51eb4cbfafa59ebf3b34`.
+- [x] Paczka portable z instrukcją i potwierdzonym zakresem obsługiwanych formatów; najnowszy exact-head artefakt CI z uruchomienia 36317086996 / #274 ma skrót SHA-256 `ab81c05939e323cfc66ec84f5d73d2f5af1ef4f5ef4e51f9e9b132e5487512de` i wygasa 2026-12-26. Lokalna paczka do testu ma SHA-256 `38ce4542e0dd018d4969df4da0c36c7a1f2ff927b6ad51eb4cbfafa59ebf3b34`.
 
 ## Notatki środowiska deweloperskiego
 
