@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from photoclean.diagnostics import RecycleVerificationError, _atomic_write_json
+import photoclean.evidence_snapshot as evidence_snapshot
 from photoclean.evidence_snapshot import load_validated_restore_evidence_snapshot
 from photoclean.recycle_evidence import (
     prepare_restore_evidence,
@@ -126,6 +127,63 @@ class EvidenceSnapshotTests(unittest.TestCase):
                     RecycleVerificationError,
                     "changed while snapshot bytes were being read",
                 ):
+                    load_validated_restore_evidence_snapshot(report)
+
+
+    def test_snapshot_requests_no_follow_flag_when_available(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            real_open = os.open
+            synthetic_nofollow = 1 << 29
+            seen_flags = []
+
+            def recording_open(path, flags, *args, **kwargs):
+                seen_flags.append(flags)
+                return real_open(path, flags & ~synthetic_nofollow, *args, **kwargs)
+
+            with patch.object(
+                evidence_snapshot.os,
+                "O_NOFOLLOW",
+                synthetic_nofollow,
+                create=True,
+            ), patch.object(evidence_snapshot.os, "open", side_effect=recording_open):
+                _check, _report_path, raw, _payload = (
+                    load_validated_restore_evidence_snapshot(report)
+                )
+
+            self.assertTrue(raw)
+            self.assertTrue(any(flags & synthetic_nofollow for flags in seen_flags))
+
+    def test_snapshot_final_entry_swap_to_symlink_fails_closed(self):
+        if not hasattr(os, "O_NOFOLLOW"):
+            self.skipTest("platform does not expose O_NOFOLLOW")
+
+        with tempfile.TemporaryDirectory() as folder:
+            _verified, report = self._verified_packaged_report(folder)
+            alternate = report.with_name("alternate-report.json")
+            alternate.write_bytes(report.read_bytes())
+
+            original_checker = evidence_snapshot._require_safe_report_entry
+            calls = 0
+
+            def swap_after_first_check(path):
+                nonlocal calls
+                info = original_checker(path)
+                calls += 1
+                if calls == 1:
+                    report.unlink()
+                    try:
+                        report.symlink_to(alternate)
+                    except OSError as error:
+                        self.skipTest(f"symlinks unavailable: {error}")
+                return info
+
+            with patch.object(
+                evidence_snapshot,
+                "_require_safe_report_entry",
+                side_effect=swap_after_first_check,
+            ):
+                with self.assertRaises(RecycleVerificationError):
                     load_validated_restore_evidence_snapshot(report)
 
 
