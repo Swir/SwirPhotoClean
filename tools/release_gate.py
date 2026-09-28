@@ -19,6 +19,7 @@ _SEMVER = re.compile(
 )
 _REPARSE_POINT_ATTRIBUTE = 0x400
 _MAX_RUNTIME_EVIDENCE_BYTES = 64 * 1024
+_MALFORMED_MARKDOWN_ESCAPE = re.compile(r"\\n(?=(?:[-*+] |# ))")
 
 
 class ReleaseGateError(ValueError):
@@ -112,6 +113,11 @@ def validate_qualified_acceptance(version: str, done: int, total: int) -> None:
 
 
 def validate_release_notes(version: str, text: str) -> None:
+    if _MALFORMED_MARKDOWN_ESCAPE.search(text):
+        raise ReleaseGateError(
+            "RELEASE_NOTES.md contains a literal \\n escape before a Markdown block; "
+            "use a real newline instead"
+        )
     headings = [line.strip() for line in text.splitlines() if line.strip().startswith("# ")]
     expected = f"# SWIR PhotoClean {version}"
     if not headings or headings[0] != expected:

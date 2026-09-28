@@ -77,6 +77,11 @@ class ReleaseGateTests(unittest.TestCase):
         with self.assertRaises(ReleaseGateError):
             validate_release_notes("1.0.0", "# SWIR PhotoClean 0.3.0\n")
 
+    def test_release_notes_reject_malformed_markdown_escape(self):
+        malformed = "# SWIR PhotoClean 1.0.0\n\nNotes." + chr(92) + "n- Broken bullet\n"
+        with self.assertRaisesRegex(ReleaseGateError, "literal"):
+            validate_release_notes("1.0.0", malformed)
+
     def test_qualified_prerelease_is_blocked_until_acceptance_is_complete(self):
         with self.assertRaisesRegex(ReleaseGateError, "7/8"):
             validate_qualified_acceptance("1.0.0-rc.1", 7, 8)

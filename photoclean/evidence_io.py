@@ -154,6 +154,8 @@ def hardened_read_json_object(
     before_identity = _file_identity(before)
 
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(source, flags)
     except OSError as error:
