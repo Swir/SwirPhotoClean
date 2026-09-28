@@ -12,8 +12,10 @@ from PIL import Image
 
 from . import i18n
 from .core import scan
+from .diagnostics import inspect_recycle_evidence
 from .folder_health_app import PhotoCleanApp
 from .insights import folder_health
+from .recycle_evidence import create_restore_evidence, _require_runtime_safety_contract
 from .safety_contract import runtime_safety_contract_sha256
 from .scan_diagnostics import build_scan_diagnostics_report
 from .selftest import run as run_base
@@ -49,6 +51,25 @@ def _probe_portable_storage(settings_path: Path) -> tuple[bool, bool]:
                 pass
 
 
+def _probe_recycle_evidence_preparation(base: Path) -> tuple[bool, bool]:
+    """Exercise the exact packaged/source evidence-preparation path without recycling."""
+
+    workspace = Path(base) / "recycle-evidence-preflight"
+    check = create_restore_evidence(workspace)
+    contract = _require_runtime_safety_contract(check)
+    inspection = inspect_recycle_evidence(check)
+    prepared = (
+        inspection.valid
+        and inspection.stage == "prepared"
+        and inspection.original_present
+        and inspection.copy_present
+        and inspection.original_matches is True
+        and inspection.copy_matches is True
+    )
+    contract_bound = len(contract) == 64 and contract == runtime_safety_contract_sha256()
+    return prepared, contract_bound
+
+
 def run(destination, settings_path=None):
     destination = Path(destination)
     code = run_base(destination)
@@ -59,6 +80,8 @@ def run(destination, settings_path=None):
     portable_mode_exercised = settings_path is not None
     portable_settings_local = False
     portable_data_dir_writable = False
+    recycle_evidence_prepared = False
+    recycle_evidence_contract_bound = False
     try:
         safety_contract_sha256 = runtime_safety_contract_sha256()
         assert len(safety_contract_sha256) == 64
@@ -92,6 +115,13 @@ def run(destination, settings_path=None):
             assert diagnostic_report["scan"]["photos"] == 2
             assert diagnostic_report["scan"]["warnings"] == 0
             assert diagnostic_report["issue_counts"] == {}
+
+            (
+                recycle_evidence_prepared,
+                recycle_evidence_contract_bound,
+            ) = _probe_recycle_evidence_preparation(folder)
+            assert recycle_evidence_prepared
+            assert recycle_evidence_contract_bound
 
             session_snapshot = SessionSnapshot(
                 roots=(folder,),
@@ -176,6 +206,9 @@ def run(destination, settings_path=None):
             structured_diagnostics_available=True,
             structured_diagnostics_non_destructive=True,
             diagnostics_export_available=True,
+            recycle_evidence_prepared=recycle_evidence_prepared,
+            recycle_evidence_contract_bound=recycle_evidence_contract_bound,
+            recycle_move_executed=False,
             portable_mode_exercised=portable_mode_exercised,
             portable_settings_local=portable_settings_local,
             portable_data_dir_writable=portable_data_dir_writable,
