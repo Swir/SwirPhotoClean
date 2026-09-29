@@ -14,7 +14,7 @@ SWIR PhotoClean 1.0.0 to lokalny, review-first cleaner zdjęć dla Windows 10/11
 - Profile wydajności, anulowanie skanowania, diagnostyka problemów, obsługa uszkodzonych plików, długich ścieżek i błędów dostępu.
 - Polski / English, HiDPI/resize, własna ikona i spójny branding `SwirPhotoClean — by Swir`.
 - Bezpieczny cleanup: rewalidacja plików, ochrona co najmniej jednej kopii w grupie oraz wyłącznie Windows Recycle Bin — bez fallbacku do trwałego usuwania.
-- Portable PyInstaller onedir, packaged `SwirPhotoClean.exe --self-test`, checksumy SHA-256, provenance i publiczny post-release smoke.
+- Portable PyInstaller onedir oraz per-user installer Windows (Inno Setup), oba kwalifikowane przez packaged `SwirPhotoClean.exe --self-test`; Release zawiera osobne checksumy SHA-256, provenance i publiczny post-release smoke.
 - Packaged evidence workflow wiążący fizyczny test Recycle/Restore z dokładnym release safety contractem i wersją 1.0.0.
 - Produkcyjny Recycle/Restore zapisuje teraz receipt tożsamości obiektu systemu plików zwrócony przez Windows Shell; jeżeli system udostępnia stabilny file index/inode, ręcznie przywrócony plik musi być tym samym obiektem, który faktycznie trafił do Kosza, więc identyczna bajtowo nowa kopia nie może podszyć się pod Restore evidence.
 - Zapis `RELEASE_EVIDENCE.json` jest fail-closed: nie może nadpisać ani aliasować surowego raportu Recycle/Restore, odrzuca niebezpieczny istniejący cel i używa unikalnego stagingu z fsync, walidacją oraz atomową podmianą.
@@ -38,7 +38,7 @@ SWIR PhotoClean 1.0.0 is a local, review-first photo cleaner for Windows 10/11. 
 - Performance profiles, scan cancellation, diagnostics, corrupt-file resilience, long-path handling, and access-error reporting.
 - Polish / English UI, HiDPI/resize support, custom icon, and consistent `SwirPhotoClean — by Swir` branding.
 - Safe cleanup with file revalidation, at-least-one-copy group protection, and Windows Recycle Bin only — no permanent-delete fallback.
-- Portable PyInstaller onedir package, packaged `SwirPhotoClean.exe --self-test`, SHA-256 checksums, provenance, and public post-release smoke verification.
+- Portable PyInstaller onedir package plus a per-user Windows installer (Inno Setup), both qualified through packaged `SwirPhotoClean.exe --self-test`; the Release ships separate SHA-256 checksums, provenance, and public post-release smoke verification.
 - Packaged evidence workflow binding the physical Recycle/Restore test to the exact release safety contract and 1.0.0 version identity.
 - Production Recycle/Restore now records a filesystem-object identity receipt returned by Windows Shell; when the filesystem exposes a stable file index/inode, the manually restored file must be the same object that was actually moved to Recycle Bin, so a newly recreated byte-identical copy cannot impersonate Restore evidence.
 - `RELEASE_EVIDENCE.json` persistence is fail-closed: it cannot overwrite or alias the raw Recycle/Restore report, rejects an unsafe existing target, and uses exclusive randomized staging with fsync, validation, and atomic replacement.

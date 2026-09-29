@@ -2,7 +2,7 @@
 
 Gałąź `main` zawiera już warstwę profesjonalnego review z **Smart Keep**, **Folder Health**, bezpiecznym **Session Save / Resume** oraz pełnoekranowym porównaniem dwóch zdjęć z synchronicznym zoomem i panoramowaniem. Funkcje te nie zmieniają modelu bezpieczeństwa: nic nie jest automatycznie zaznaczane do usunięcia, a sesje nie zapisują zaznaczeń do Kosza.
 
-Najnowszym publicznym wydaniem pozostaje **v0.3.0 prerelease**. Rozwój do 1.0 jest aktywny, ale stabilne 1.0 nie będzie publikowane przed przejściem całej bramki odbioru. Aktualny wynik bramki pozostaje **7 / 8 = 87,5%**; jedynym niespełnionym kryterium jest realnie potwierdzone przeniesienie wygenerowanej kopii do Kosza Windows i jej przywrócenie przy zachowaniu oryginału.
+Najnowszym publicznym wydaniem pozostaje **v0.3.0 prerelease**. Rozwój do 1.0 jest aktywny, ale stabilne 1.0 nie będzie publikowane przed przejściem całej bramki odbioru. Aktualny wynik bramki to **8 / 8 = 100,0%**. Zweryfikowany packaged-Windows evidence potwierdza przeniesienie wygenerowanej kopii do Kosza Windows, ręczne przywrócenie jej przy zachowaniu oryginału i poprawną weryfikację SHA-256.
 
 ## Aktualizacja 0.3.0 — 2026-09-10
 
@@ -18,7 +18,7 @@ Usunięto zależność od Image.get_flattened_data; skanowanie korzysta z bajtó
 
 Przestrzenny nagłówek, wypukłe przyciski, karty podglądów, powiększenie dwuklikiem. Poprawiono podgląd przezroczystości i blokadę odznaczania podczas operacji. 24 testy przechodzą, w tym powiększenie i stany przycisków. Udane przeniesienie do Kosza i przywrócenie nadal wymaga potwierdzenia w zwykłej sesji Windows.
 
-# Status — aktualizowany do 2026-09-19
+# Status — aktualizowany do 2026-09-29
 
 ## Etap
 
@@ -40,15 +40,15 @@ Rozwój po publicznym wydaniu **v0.3.0 prerelease** w kierunku stabilnego 1.0. `
 ## Warunki odbioru — do zakończenia przed 1.0
 
 <p align="center">
-  <img width="100%" src="assets/readme/progress-mini.svg" alt="SWIR PhotoClean 1.0 acceptance gate — 7 of 8 verified, 87.5 percent" />
+  <img width="100%" src="assets/readme/progress-mini.svg" alt="SWIR PhotoClean 1.0 acceptance gate — 8 of 8 verified, 100.0 percent" />
 </p>
 
-**Postęp bramki 1.0: 7 / 8 = 87,5%.** Wartość wynika wyłącznie z poniższej listy `[x]/[ ]`; generator `tools/readme_progress.py` aktualizuje SVG z tej samej sekcji.
+**Postęp bramki 1.0: 8 / 8 = 100,0%.** Wartość wynika wyłącznie z poniższej listy `[x]/[ ]`; generator `tools/readme_progress.py` aktualizuje SVG z tej samej sekcji.
 
 - [x] Udane 24 testy, kompilacja EXE z własną ikoną, samokontrola gotowej paczki i artefakt ZIP w GitHub Actions (uruchomienie 34398518376).
 - [x] Test uruchomienia gotowego EXE z własnym Tcl/Tk i dwoma podglądami obrazów. Pierwsza paczka ujawniła błąd wyszukiwania Tcl; poprawiona paczka przeszła samokontrolę.
 - [x] Sprawdzenie wyglądu przy skalowaniu 100% i 150%, długich ścieżkach i minimalnym oknie 900 × 700; pełną ścieżkę można skopiować przyciskiem bez rozciągania interfejsu.
-- [ ] Udane przeniesienie wygenerowanej kopii do kosza i jej przywrócenie na Windows, przy zachowaniu oryginału.
+- [x] Udane przeniesienie wygenerowanej kopii do kosza i jej przywrócenie na Windows, przy zachowaniu oryginału.
 - [x] Potwierdzenie odmowy trwałego usuwania przy niedostępnym koszu: Windows nie potwierdził operacji kosza, aplikacja ją przerwała, a oba wygenerowane pliki pozostały na miejscu.
 - [x] Test pracy na 500 wygenerowanych obrazach oraz anulowania w trakcie porównywania; przed 1.0 warto rozszerzyć próbę na wolniejszy dysk i większe fotografie.
 - [x] Testy orientacji EXIF, limitu dużych obrazów i błędów dostępu.
@@ -60,7 +60,7 @@ Lokalny runtime dostarczony z aplikacją wymagał względnych TCL_LIBRARY/TK_LIB
 
 ## Następne kroki
 
-Przed 1.0 potwierdzić przywracanie z Kosza, kontynuować hardening nowych funkcji review i rozszerzyć testy większych zbiorów oraz dużych fotografii bez osłabiania dotychczasowych zabezpieczeń.
+Bramka 1.0 jest kompletna. Następny krok to exact-head Windows CI release closeoutu, publikacja v1.0.0 oraz automatyczna weryfikacja publicznych artefaktów.
 
 ## Development cadence — 2026-09-19
 
