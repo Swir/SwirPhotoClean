@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import tempfile
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,8 @@ PROJECT = "SwirPhotoClean"
 SCHEMA_VERSION = 2
 LEGACY_SCHEMA_VERSION = 1
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DEFAULT_RELEASE_EVIDENCE = ROOT / "RELEASE_EVIDENCE.json"
 _CHUNK_SIZE = 1024 * 1024
 _MAX_PROVENANCE_MANIFEST_BYTES = 64 * 1024
