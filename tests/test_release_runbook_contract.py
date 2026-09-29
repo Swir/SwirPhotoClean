@@ -32,6 +32,18 @@ class ReleaseRunbookContractTests(unittest.TestCase):
         self.assertIn("does not authorize a release by itself", runbook)
         self.assertIn("never use permanent deletion as a fallback", runbook)
 
+    def test_failed_prepare_reuses_the_same_generated_fixture(self):
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+        workflow = (ROOT / "photoclean" / "recycle_evidence.py").read_text(
+            encoding="utf-8"
+        )
+        for marker in ("MOVE_NOT_CONFIRMED", "PREPARED_MANIFEST", "RETRY_COMMAND"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, runbook)
+                self.assertIn(marker, workflow)
+        self.assertIn("do not run `--recycle-restore-prepare` again", runbook)
+        self.assertIn("--recycle-restore-move", runbook)
+
 
 if __name__ == "__main__":
     unittest.main()
