@@ -11,7 +11,7 @@
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-02050A?style=for-the-badge&logo=windows11&logoColor=62E5FF)
 ![Python](https://img.shields.io/badge/Python-3.12-02050A?style=for-the-badge&logo=python&logoColor=62E5FF)
 ![Processing](https://img.shields.io/badge/Processing-Local-02050A?style=for-the-badge&logoColor=62E5FF)
-![Preview](https://img.shields.io/badge/Preview-v0.3.0-02050A?style=for-the-badge&logo=github&logoColor=62E5FF)
+![1.0 Gate](https://img.shields.io/badge/1.0%20Gate-100%25-02050A?style=for-the-badge&logo=github&logoColor=62E5FF)
 
 [![Author](https://img.shields.io/badge/by-Swir-0088FF?style=flat-square&logo=github)](https://github.com/Swir)
 [![Stars](https://img.shields.io/github/stars/Swir/SwirPhotoClean?style=flat-square&color=0088FF)](https://github.com/Swir/SwirPhotoClean/stargazers)
@@ -30,14 +30,14 @@
 | Platform | Windows 10 / 11 |
 | Processing | Local; no photo upload required by the application |
 | Latest public release | [v0.3.0 prerelease](https://github.com/Swir/SwirPhotoClean/releases/tag/v0.3.0) |
-| 1.0 acceptance gate | **7 / 8 = 87.5%** from the authoritative checklist in [`STATUS.md`](STATUS.md) |
-| Remaining 1.0 blocker | Confirm successful move-to-Recycle-Bin **and restore** on Windows while preserving the original |
+| 1.0 acceptance gate | **8 / 8 = 100.0%** from the authoritative checklist in [`STATUS.md`](STATUS.md) |
+| Remaining 1.0 blocker | **None** — physical Recycle/Restore evidence is verified; qualified publication is pending |
 
 <p align="center">
-  <img width="100%" src="assets/readme/progress-card.svg" alt="SWIR PhotoClean 1.0 acceptance progress — 7 of 8 verified, 87.5 percent" />
+  <img width="100%" src="assets/readme/progress-card.svg" alt="SWIR PhotoClean 1.0 acceptance progress — 8 of 8 verified, 100.0 percent" />
 </p>
 
-The percentage above measures only the explicit **1.0 acceptance gate**. It does not claim that every possible future feature is complete or that v0.3.0 is a stable 1.0 release.
+The percentage above measures only the explicit **1.0 acceptance gate**. The gate is complete; public v1.0.0 status remains separate until the qualified release workflow finishes publication and post-release smoke verification.
 
 ## 🚀 Overview
 
@@ -90,7 +90,7 @@ Python needs working Tcl/Tk support for the desktop GUI.
 |---|---|
 | OS | Windows 10 / 11 |
 | Source runtime | Python 3.12 in the project workflow |
-| Packaged app | PyInstaller onedir portable package |
+| Packaged app | PyInstaller onedir portable package + per-user Windows installer |
 | UI languages | English / Polski |
 | Supported image files | JPG/JPEG, PNG, WebP, BMP, single-image TIFF, single-image GIF |
 | Not supported | HEIC, RAW camera formats, animated images, multi-page image files |
@@ -162,7 +162,7 @@ The existing runtime icon is preserved in `assets/SwirPhotoClean.ico` and `asset
 
 ## 🗺️ 1.0 Acceptance Progress
 
-The authoritative acceptance list is in [`STATUS.md`](STATUS.md). Its current state is **7 verified / 8 total = 87.5%**. The remaining unchecked requirement is a successful Windows Recycle Bin move-and-restore test that preserves the original copy.
+The authoritative acceptance list is in [`STATUS.md`](STATUS.md). Its current state is **8 verified / 8 total = 100.0%**. The packaged Windows Recycle Bin move → manual Restore → SHA-256/original-preservation evidence has been verified against the exact release safety contract.
 
 `tools/readme_progress.py` parses that exact checklist, calculates the unrounded fraction, generates both SVGs and detects stale files:
 
@@ -181,7 +181,7 @@ Run source tests:
 python tools/readme_progress.py --check
 ```
 
-The pull-request workflow uses Python 3.12 on Windows, runs the test suite, builds the PyInstaller onedir package and executes the packaged `SwirPhotoClean.exe --self-test` path before uploading an artifact. `tools/release_gate.py` also fails closed for release metadata: 0.x / explicit RC versions stay prerelease, while a stable 1.x release is blocked until the authoritative `STATUS.md` acceptance checklist is complete and `RELEASE_NOTES.md` matches the exact version.
+The pull-request workflow uses Python 3.12 on Windows, runs the test suite, builds the PyInstaller onedir package and a per-user Windows installer, then exercises packaged `SwirPhotoClean.exe --self-test` plus installer install/self-test/uninstall before uploading artifacts. `tools/release_gate.py` fails closed for release metadata and requires the complete acceptance checklist plus valid exact-contract runtime evidence for stable 1.x publication.
 
 ## 📦 Releases
 
@@ -195,7 +195,7 @@ Latest public release: **[v0.3.0 prerelease](https://github.com/Swir/SwirPhotoCl
 - Exact and similar groups can overlap.
 - Similarity grouping is reference-based; not every pair inside a group must be equally similar.
 - HEIC, RAW, animated and multi-page images are outside the current scope.
-- The Recycle Bin restore acceptance check is still incomplete; this is why the 1.0 gate is not complete.
+- Qualified Recycle/Restore evidence is tied to the exact release safety contract; future safety-critical runtime changes require fresh physical Windows evidence before another qualified release.
 - The displayed “To Recycle Bin” size is selected-file size, not guaranteed freed disk space until the Recycle Bin is emptied.
 - No `LICENSE` file is present in the repository; this documentation migration does not change licensing terms.
 
