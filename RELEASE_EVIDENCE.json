@@ -1,0 +1,18 @@
+{
+  "schema_version": 3,
+  "kind": "windows-recycle-restore",
+  "session_id": "36a0ae3887fc406d98cd008417665616",
+  "fixture_sha256": "95cf0584419bc75106a897c5e7a899543cb5fe4988ffd9a8540b69a3214ba7dd",
+  "manifest_fingerprint": "24dfe37243cb7902ddd2afa4ddd3e2ff74591fad6b152874f15dd1f8267b213b",
+  "evidence_report_sha256": "f6aaa14c9e70a94c3d65d68e310eac508781da14992cbb01bd8a24c511e20358",
+  "safety_contract_sha256": "c00f412cb291944792863a2ef751a4f3106376b2892ef131b74f0905ecaf7164",
+  "verified_at_utc": "2026-09-29T18:40:09+00:00",
+  "reviewed_at_utc": "2026-09-29T18:40:21+00:00",
+  "physical_recycle_move_confirmed": true,
+  "manual_restore_performed": true,
+  "original_preserved": true,
+  "restored_copy_sha256_verified": true,
+  "report_review_valid": true,
+  "windows_packaged_runtime_confirmed": true,
+  "acceptance_gate_closed": false
+}
