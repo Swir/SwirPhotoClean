@@ -57,6 +57,44 @@ jobs:
           if (-not $report.portable_data_dir_writable) { throw 'Portable data directory was not writable in the packaged smoke test' }
           $sourceContract = (Get-Content assets/safety-contract.json -Raw | ConvertFrom-Json).sha256
           if ($report.safety_contract_sha256 -ne $sourceContract) { throw 'Portable package safety contract differs from exact-head source contract' }
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path photoclean/__init__.py -Pattern '__version__ = "([^"]+)"').Matches.Groups[1].Value
+          if (-not $version) { throw 'Missing version' }
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler is unavailable at $iscc" }
+          & $iscc "/DMyAppVersion=$version" "installer/SwirPhotoClean.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed' }
+          $installer = Join-Path $PWD "installer-output/SwirPhotoClean-$version-Windows-Setup.exe"
+          if (-not (Test-Path $installer)) { throw 'Expected Windows installer was not produced' }
+      - name: Smoke-test Windows installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path photoclean/__init__.py -Pattern '__version__ = "([^"]+)"').Matches.Groups[1].Value
+          $installer = Join-Path $PWD "installer-output/SwirPhotoClean-$version-Windows-Setup.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP 'SwirPhotoClean-installer-smoke'
+          if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+          $installArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installDir")
+          $process = Start-Process -FilePath $installer -ArgumentList $installArgs -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(120000)) { Stop-Process -Id $process.Id; throw 'Installer timed out' }
+          if ($process.ExitCode -ne 0) { throw "Installer failed with exit code $($process.ExitCode)" }
+          $installedExe = Join-Path $installDir 'SwirPhotoClean.exe'
+          if (-not (Test-Path $installedExe)) { throw 'Installed SwirPhotoClean.exe is missing' }
+          $reportPath = Join-Path $PWD 'installed-smoke.json'
+          $process = Start-Process -FilePath $installedExe -ArgumentList '--self-test', $reportPath -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'Installed app self-test timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Installed app self-test failed' }
+          $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+          if (-not $report.ok) { throw 'Installed app self-test report failed' }
+          $sourceContract = (Get-Content assets/safety-contract.json -Raw | ConvertFrom-Json).sha256
+          if ($report.safety_contract_sha256 -ne $sourceContract) { throw 'Installed package safety contract differs from exact-head source contract' }
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'Installer did not create an uninstaller' }
+          $process = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(120000)) { Stop-Process -Id $process.Id; throw 'Uninstaller timed out' }
+          if ($process.ExitCode -ne 0) { throw "Uninstaller failed with exit code $($process.ExitCode)" }
+          if (Test-Path $installedExe) { throw 'Installed executable remains after silent uninstall' }
       - name: Smoke-test packaged Recycle restore command dispatch
         shell: pwsh
         run: |
@@ -69,6 +107,11 @@ jobs:
         with:
           name: SwirPhotoClean-windows-portable
           path: dist/SwirPhotoClean/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SwirPhotoClean-windows-installer
+          path: installer-output/SwirPhotoClean-*-Windows-Setup.exe
           if-no-files-found: error
   release:
     # Release publication is an explicit commit-title action. The token must be
@@ -92,6 +135,10 @@ jobs:
         with:
           name: SwirPhotoClean-windows-portable
           path: package/SwirPhotoClean
+      - uses: actions/download-artifact@v4
+        with:
+          name: SwirPhotoClean-windows-installer
+          path: package-installer
       - name: Stage, verify, publish and re-verify tested portable release
         shell: pwsh
         env:
@@ -115,6 +162,11 @@ jobs:
           $archive = "SwirPhotoClean-$version-Windows.zip"
           $checksum = "$archive.sha256"
           $provenance = "$archive.provenance.json"
+          $installerName = "SwirPhotoClean-$version-Windows-Setup.exe"
+          $installerPath = Join-Path $PWD "package-installer/$installerName"
+          if (-not (Test-Path $installerPath)) { throw 'Qualified Windows installer artifact is missing' }
+          $installerChecksum = "$installerName.sha256"
+          $installerProvenance = "$installerName.provenance.json"
           Compress-Archive -Path package/SwirPhotoClean -DestinationPath $archive
           $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
           "$digest  $archive" | Set-Content $checksum -Encoding utf8
@@ -125,6 +177,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release provenance creation failed' }
           python tools/release_provenance.py verify --archive $archive --manifest $provenance --expected-version $version --expected-commit $env:GITHUB_SHA --expected-workflow-run-id $env:GITHUB_RUN_ID --expected-channel $channel
           if ($LASTEXITCODE -ne 0) { throw 'Release provenance verification failed' }
+
+          $installerDigest = (Get-FileHash $installerPath -Algorithm SHA256).Hash.ToLower()
+          "$installerDigest  $installerName" | Set-Content $installerChecksum -Encoding utf8
+          python tools/release_provenance.py write --archive $installerPath --output $installerProvenance --version $version --commit $env:GITHUB_SHA --workflow-run-id $env:GITHUB_RUN_ID --channel $channel
+          if ($LASTEXITCODE -ne 0) { throw 'Installer provenance creation failed' }
+          python tools/release_provenance.py verify --archive $installerPath --manifest $installerProvenance --expected-version $version --expected-commit $env:GITHUB_SHA --expected-workflow-run-id $env:GITHUB_RUN_ID --expected-channel $channel
+          if ($LASTEXITCODE -ne 0) { throw 'Installer provenance verification failed' }
 
           $prepublishRoot = Join-Path $PWD 'release-archive-smoke'
           if (Test-Path $prepublishRoot) { Remove-Item $prepublishRoot -Recurse -Force }
@@ -145,7 +204,44 @@ jobs:
           if (-not $report.ok) { throw 'Release archive self-test report failed' }
           if ($hasReleaseEvidence -and $report.safety_contract_sha256 -ne (Get-Content $releaseEvidence -Raw | ConvertFrom-Json).safety_contract_sha256) { throw 'Release package safety contract differs from physical runtime evidence' }
 
-          $releaseAssets = @($archive, $checksum, $provenance)
+          function Test-InstallerPackage {
+            param(
+              [Parameter(Mandatory = $true)][string]$InstallerPath,
+              [Parameter(Mandatory = $true)][string]$Label
+            )
+
+            $installRoot = Join-Path $env:RUNNER_TEMP "SwirPhotoClean-$Label-install"
+            if (Test-Path $installRoot) { Remove-Item $installRoot -Recurse -Force }
+            $installArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installRoot")
+            $process = Start-Process -FilePath $InstallerPath -ArgumentList $installArgs -WindowStyle Hidden -PassThru
+            if (-not $process.WaitForExit(120000)) { Stop-Process -Id $process.Id; throw "$Label installer timed out" }
+            if ($process.ExitCode -ne 0) { throw "$Label installer failed with exit code $($process.ExitCode)" }
+
+            $installedExe = Join-Path $installRoot 'SwirPhotoClean.exe'
+            if (-not (Test-Path $installedExe)) { throw "$Label installed executable is missing" }
+            $selfTestReport = Join-Path $PWD "$Label-installer-smoke.json"
+            $process = Start-Process -FilePath $installedExe -ArgumentList '--self-test', $selfTestReport -WindowStyle Hidden -PassThru
+            if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw "$Label installed app self-test timed out" }
+            if ($process.ExitCode -ne 0) { throw "$Label installed app self-test failed" }
+            $report = Get-Content $selfTestReport -Raw | ConvertFrom-Json
+            if (-not $report.ok) { throw "$Label installed app self-test report failed" }
+            $expectedContract = (Get-Content assets/safety-contract.json -Raw | ConvertFrom-Json).sha256
+            if ($hasReleaseEvidence) {
+              $expectedContract = (Get-Content $releaseEvidence -Raw | ConvertFrom-Json).safety_contract_sha256
+            }
+            if ($report.safety_contract_sha256 -ne $expectedContract) { throw "$Label installer safety contract differs from qualified contract" }
+
+            $uninstaller = Join-Path $installRoot 'unins000.exe'
+            if (-not (Test-Path $uninstaller)) { throw "$Label uninstaller is missing" }
+            $process = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -WindowStyle Hidden -PassThru
+            if (-not $process.WaitForExit(120000)) { Stop-Process -Id $process.Id; throw "$Label uninstaller timed out" }
+            if ($process.ExitCode -ne 0) { throw "$Label uninstaller failed with exit code $($process.ExitCode)" }
+            if (Test-Path $installedExe) { throw "$Label installed executable remains after uninstall" }
+          }
+
+          Test-InstallerPackage -InstallerPath $installerPath -Label 'prepublish'
+
+          $releaseAssets = @($archive, $checksum, $provenance, $installerPath, $installerChecksum, $installerProvenance)
           if ($hasReleaseEvidence) {
             $releaseAssets += $releaseEvidence
           }
@@ -158,7 +254,7 @@ jobs:
 
             if (Test-Path $Root) { Remove-Item $Root -Recurse -Force }
             New-Item -ItemType Directory -Path $Root -Force | Out-Null
-            gh release download "v$version" --dir $Root --pattern $archive --pattern $checksum --pattern $provenance
+            gh release download "v$version" --dir $Root --pattern $archive --pattern $checksum --pattern $provenance --pattern $installerName --pattern $installerChecksum --pattern $installerProvenance
             if ($LASTEXITCODE -ne 0) { throw "Could not download $Label release assets" }
 
             $downloadedEvidence = $null
@@ -185,6 +281,17 @@ jobs:
             python tools/release_provenance.py verify --archive $downloadedArchive --manifest $downloadedProvenance --expected-version $version --expected-commit $env:GITHUB_SHA --expected-workflow-run-id $env:GITHUB_RUN_ID --expected-channel $channel
             if ($LASTEXITCODE -ne 0) { throw "$Label release provenance verification failed" }
 
+            $downloadedInstaller = Join-Path $Root $installerName
+            $downloadedInstallerChecksum = Join-Path $Root $installerChecksum
+            $downloadedInstallerProvenance = Join-Path $Root $installerProvenance
+            $installerChecksumParts = ((Get-Content $downloadedInstallerChecksum -Raw).Trim() -split '\s+')
+            if ($installerChecksumParts.Count -lt 1) { throw "$Label installer checksum sidecar is malformed" }
+            $expectedInstallerDigest = $installerChecksumParts[0].ToLower()
+            $actualInstallerDigest = (Get-FileHash $downloadedInstaller -Algorithm SHA256).Hash.ToLower()
+            if ($expectedInstallerDigest -ne $actualInstallerDigest) { throw "$Label installer checksum does not match sidecar" }
+            python tools/release_provenance.py verify --archive $downloadedInstaller --manifest $downloadedInstallerProvenance --expected-version $version --expected-commit $env:GITHUB_SHA --expected-workflow-run-id $env:GITHUB_RUN_ID --expected-channel $channel
+            if ($LASTEXITCODE -ne 0) { throw "$Label installer provenance verification failed" }
+
             $extracted = Join-Path $PWD "$Label-release-extracted"
             if (Test-Path $extracted) { Remove-Item $extracted -Recurse -Force }
             Expand-Archive -Path $downloadedArchive -DestinationPath $extracted
@@ -207,6 +314,8 @@ jobs:
               $evidenceContract = (Get-Content $downloadedEvidence -Raw | ConvertFrom-Json).safety_contract_sha256
               if ($report.safety_contract_sha256 -ne $evidenceContract) { throw "$Label package safety contract differs from physical runtime evidence" }
             }
+
+            Test-InstallerPackage -InstallerPath $downloadedInstaller -Label "$Label-downloaded"
           }
 
           if ($channel -eq 'stable') {
