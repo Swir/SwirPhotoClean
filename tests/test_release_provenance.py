@@ -20,6 +20,11 @@ OTHER_CONTRACT = "b" * 64
 
 
 class ReleaseProvenanceTests(unittest.TestCase):
+    def test_direct_cli_bootstraps_repository_root_for_imports(self):
+        script = (Path(__file__).resolve().parents[1] / "tools" / "release_provenance.py").read_text(encoding="utf-8")
+        self.assertIn("import sys", script)
+        self.assertIn("sys.path.insert(0, str(ROOT))", script)
+
     def _archive(self, root: Path, name: str = "SwirPhotoClean-1.0.0-Windows.zip") -> Path:
         archive = root / name
         archive.write_bytes(b"PK\x03\x04swir-photo-clean-release-fixture")
