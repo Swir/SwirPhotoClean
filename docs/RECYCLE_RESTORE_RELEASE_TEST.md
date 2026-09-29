@@ -22,7 +22,7 @@ The command must exit with code 0 and the JSON report must contain `"ok": true`.
 .\SwirPhotoClean.exe --recycle-restore-prepare
 ```
 
-2. The command must report `MOVE_CONFIRMED`, `ORIGINAL_PRESERVED` and the manifest path. Do not recreate or rename the generated fixture.
+2. The command must report `MOVE_CONFIRMED`, `ORIGINAL_PRESERVED` and the manifest path. Do not recreate or rename the generated fixture. If it instead reports `MOVE_NOT_CONFIRMED`, do not run `--recycle-restore-prepare` again. Keep the printed `PREPARED_MANIFEST`, confirm both generated files remain in that workspace, then use the printed `RETRY_COMMAND` (`--recycle-restore-move`) to retry that same fixture. The gate remains open until `MOVE_CONFIRMED` is reported.
 
 3. Open Windows Recycle Bin and manually choose **Restore** for `RECYCLE-ME.png`.
 
