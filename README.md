@@ -20,6 +20,12 @@
 
 </div>
 
+## 📸 Screenshot
+
+![SwirPhotoClean application screenshot](docs/screenshots/application.jpg)
+
+Initial PhotoClean window on Windows, before selecting or scanning any photos.
+
 <img width="100%" src="https://raw.githubusercontent.com/Swir/Swir/main/assets/power-divider-v4.svg" alt="SWIR electric divider" />
 
 ## 📍 Project Status
